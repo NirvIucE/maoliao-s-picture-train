@@ -5,7 +5,16 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "bcrypt<4.1",
+    "email-validator>=2.3.0",
     "fastapi>=0.139.2",
+    "passlib[bcrypt]>=1.7.4",
+    "pydantic[email,email-validator]>=2.13.4",
+    "pymysql>=1.2.0",
+    "python-dotenv>=1.2.2",
+    "python-jose[cryptography]>=3.5.0",
+    "python-multipart>=0.0.32",
+    "sqlalchemy>=2.0.51",
     "uvicorn>=0.51.0",
 ]
 
