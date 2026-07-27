@@ -17,3 +17,7 @@ env/
 # IDE
 .idea/
 .vscode/
+
+# 上传文件
+uploads/
+*.webp

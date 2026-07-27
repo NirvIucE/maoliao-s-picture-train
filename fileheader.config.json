@@ -1,0 +1,18 @@
+{
+  "autoAdd": false,
+  "autoAlready": false,
+  "createHeader": false,
+  "annotationStr": {
+    "head": "r'''",
+    "middle": "",
+    "end": "'''"
+  },
+  "headDesign": "Author: NirvIucE 1750682685@qq.com\nDate: {createTime}\nFilePath: {filePath}\nDescription: ",
+  "prohibitAutoAdd": ["py"],
+  "moveHeader": false,
+  "wideSame": true,
+  "wideNum": 13,
+  "functionWideNum": 0,
+  "afterHeadLineNum": 1,
+  "beforeHeadLineNum": 0
+}

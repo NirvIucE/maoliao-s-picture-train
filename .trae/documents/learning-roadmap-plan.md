@@ -297,6 +297,13 @@ new-picture-train/： (项目根目录){
 - 图片列表按创建时间倒序返回
 - 删除图片同时删除物理文件
 
+**后续增强计划**：
+- 保留用户上传的原始格式文件（如 png），提供原图下载功能。需改动：
+  - `Image` 模型加 `original_path` 字段
+  - `save_upload_file()` 保留原格式副本
+  - `ImageResponse` 加 `original_url` 字段
+  - `delete_image()` 同步清理原图文件
+
 ---
 
 ### 阶段 3：Vue3 前端搭建
