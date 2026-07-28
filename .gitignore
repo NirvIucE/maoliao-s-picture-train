@@ -21,3 +21,7 @@ env/
 # 上传文件
 uploads/
 *.webp
+
+# 前端
+node_modules/
+dist/
