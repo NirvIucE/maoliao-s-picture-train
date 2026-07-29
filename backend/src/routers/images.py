@@ -30,7 +30,7 @@ async def upload(
     image = image_service.upload_file(db, file, current_user)
     return _build_upload_response(image)
 
-@router.post("/upload_url", response_model=ImageUploadResponse)
+@router.post("/upload-url", response_model=ImageUploadResponse)
 async def upload_url(
     req: URLUploadRequest,
     db: Session = Depends(get_db),

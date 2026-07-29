@@ -1,6 +1,15 @@
+'''
+Author: NirvIucE 1750682685@qq.com
+Date: 2026-07-24 21:21:41
+LastEditors: NirvIucE 1750682685@qq.com
+LastEditTime: 2026-07-29 16:00:35
+FilePath: \new-picture-train\backend\src\models\image.py
+Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+'''
 """
 图片表模型
 """
+import os
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 
@@ -26,3 +35,14 @@ class Image(Base):
     # ORM 关系
     user = relationship("User", back_populates="images")
     tags = relationship("Tag", secondary="image_tags", back_populates="images")
+
+    # 计算属性：Pydantic from_attributes 可读取 @property
+    @property
+    def image_url(self) -> str:
+        return f"/static/uploads/{self.filename}"
+
+    @property
+    def thumbnail_url(self) -> str | None:
+        if self.thumbnail_path:
+            return f"/static/uploads/{os.path.basename(self.thumbnail_path)}"
+        return None
