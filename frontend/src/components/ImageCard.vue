@@ -1,7 +1,7 @@
 
 <script setup lang="ts">
 import { ref } from "vue"
-import { deleteImage } from "@/api/images"
+import { deleteImage, getDownloadUrl, downloadOriginalImage } from "@/api/images"
 import type { ImageItem } from "@/api/images"
 
 const props = defineProps<{ image: ImageItem }>()
@@ -20,6 +20,10 @@ async function handleDelete() {
     showConfirm.value = false
   }
 }
+
+async function handleDownload() {
+  await downloadOriginalImage(props.image.id, props.image.original_name)
+}
 </script>
 
 <template>
@@ -27,30 +31,27 @@ async function handleDelete() {
         <div class="card-image">
             <img 
                 :src="image.thumbnail_url || image.image_url || ''" 
-                :alt="image.original_name"
+                :alt="image.display_name"
                 loading="lazy"
             />
         </div>
         <div class="card-info">
-            <p class="name" :title="image.original_name">
-                {{ image.original_name }}
+            <p class="name" :title="image.display_name">
+                {{ image.display_name }}
             </p>
             <p class="size">
                 {{ (image.file_size / 1024).toFixed(1) }} KB
             </p>
-            <button 
-                v-if="!showConfirm"
-                class="btn-delete"
-                @click="showConfirm = true"
-            >
-                删除图片
-            </button>
-            <div v-else class="confirm">
-                <span>
-                    确认删除吗？
-                </span>
-                <button class="btn-yes" :disabled="deleting" @click="handleDelete">确认</button>
-                <button class="btn-no" @click="showConfirm = false">取消</button>
+            <div class="actions">
+              <button class="btn-download" @click="handleDownload">
+                下载原图
+              </button>
+              <button v-if="!showConfirm" class="btn-delete" @click="showConfirm = true">删除</button>
+              <div v-else class="confirm">
+                <span>确认？</span>
+                <button class="btn-yes" :disabled="deleting" @click="handleDelete">是</button>
+                <button class="btn-no" @click="showConfirm = false">否</button>
+              </div>
             </div>
         </div>
     </div>
@@ -89,6 +90,22 @@ async function handleDelete() {
 .size {
   margin: 0 0 8px 0;
   color: #909399;
+  font-size: 13px;
+}
+.actions { 
+  display: flex; 
+  align-items: center; 
+  gap: 8px; 
+  flex-wrap: wrap; 
+}
+.btn-download {
+  padding: 3px 10px;
+  background: #409eff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  text-decoration: none;
   font-size: 13px;
 }
 .btn-delete {

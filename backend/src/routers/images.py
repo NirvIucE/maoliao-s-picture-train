@@ -5,7 +5,8 @@
 
 import os
 
-from fastapi import APIRouter, Depends, UploadFile, File, Query
+from fastapi import APIRouter, Depends, UploadFile, File, Query, Form, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -19,15 +20,17 @@ router = APIRouter(prefix="/api/images", tags = ["图片"])
 
 class URLUploadRequest(BaseModel):
     url: str
+    custom_name: str | None = None
 
 @router.post("/upload", response_model=ImageUploadResponse)
 async def upload(
     file: UploadFile = File(...),
+    custom_name: str = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """上传文件"""
-    image = image_service.upload_file(db, file, current_user)
+    """上传文件（可选自定义名称）"""
+    image = image_service.upload_file(db, file, current_user, custom_name)
     return _build_upload_response(image)
 
 @router.post("/upload-url", response_model=ImageUploadResponse)
@@ -37,18 +40,19 @@ async def upload_url(
     current_user: User = Depends(get_current_user),
 ):
     """上传URL图片"""
-    image = await image_service.upload_from_url(db, req.url, current_user)
+    image = await image_service.upload_from_url(db, req.url, current_user, req.custom_name)
     return _build_upload_response(image)
 
 @router.get("", response_model=ImageListResponse)
 def list_images(
     skip: int = Query(0,ge = 0),    # 跳过前 N 条记录，ge=0 表示最小值为 0
     limit: int = Query(20, ge = 1, le = 100),    # 最多返回 N 条记录，最小 1，最大 100
+    search: str | None = Query(None, description="搜索关键词（匹配图片名称）"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取图片列表"""
-    return image_service.get_user_image(db, current_user, skip, limit)
+    """获取图片列表（支持搜索）"""
+    return image_service.get_user_images(db, current_user, skip, limit, search)
 
 @router.get("/{image_id}", response_model=ImageResponse)
 def get_image(
@@ -58,6 +62,22 @@ def get_image(
 ):
     """获取图片详情"""
     return image_service.get_image_detail(db, image_id, current_user)
+
+@router.get("/{image_id}/download")
+def download_original(
+    image_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """下载原始格式图片"""
+    image = image_service.get_image_detail(db, image_id, current_user)
+    if not os.path.exists(image.file_path):
+        raise HTTPException(status_code=404, detail="原始图片不存在")
+    return FileResponse(
+        image.file_path, 
+        filename=image.original_name,
+        media_type="application/octet-stream",
+    )
 
 @router.delete("/{image_id}")
 def delete_image(
@@ -74,9 +94,11 @@ def _build_upload_response(image) -> dict:
     return {
         "id": image.id,
         "original_name": image.original_name,
+        "custom_name": image.custom_name,
+        "display_name": image.display_name,
         "file_size": image.file_size,
         "width": image.width,
         "height": image.height,
-        "image_url": f"/static/uploads/{image.filename}",
-        "thumbnail_url": f"/static/uploads/{os.path.basename(image.thumbnail_path)}",
+        "image_url": image.image_url,
+        "thumbnail_url": image.thumbnail_url,
     }    

@@ -88,14 +88,14 @@ new-picture-train/： (项目根目录){
          models/： (SQLAlchemy ORM 数据模型){
             __init__.py
             user.py： (用户表模型)
-            image.py： (图片表模型)
+            image.py： (图片表模型: filename, original_name, custom_name, date_dir, file_path, thumbnail_path)
             tag.py： (标签表模型 + image_tags 多对多关联)
             conversation.py： (对话 & 消息模型，阶段6引入)
          }
          schemas/： (Pydantic 请求/响应校验模型){
             __init__.py
             user.py： (UserCreate、UserLogin、UserResponse、TokenResponse)
-            image.py： (ImageResponse、ImageUploadResponse 等)
+            image.py： (ImageResponse, ImageUploadResponse, ImageListResponse；含 display_name 计算字段)
             agent.py： (ChatRequest、AnalysisResponse 等)
          }
          routers/： (API 路由——接收请求，调用 service，返回响应){
@@ -114,7 +114,7 @@ new-picture-train/： (项目根目录){
          utils/： (工具函数——纯函数，无副作用){
             __init__.py
             security.py： (JWT 编解码、密码哈希)
-            image_utils.py： (WebP 压缩、缩略图生成)
+            image_utils.py： (格式校验、尺寸获取、缩略图生成、日期目录)
          }
          uploads/： (用户上传的图片 & 缩略图存储，gitignore)
       }
@@ -198,22 +198,25 @@ new-picture-train/： (项目根目录){
 ### 数据库 ER 图（核心表）
 
 ```
-┌─────────────┐       ┌──────────────────┐       ┌─────────────┐
-│   users     │       │     images       │       │    tags     │
-├─────────────┤       ├──────────────────┤       ├─────────────┤
-│ id (PK)     │──1:N──│ id (PK)          │       │ id (PK)     │
-│ username    │       │ user_id (FK)     │──N:M──│ name        │
-│ email       │       │ filename         │       └─────────────┘
-│ password    │       │ original_name    │              │
-│ created_at  │       │ file_path        │       ┌──────┴──────┐
-│ updated_at  │       │ thumbnail_path   │       │ image_tags  │
-└─────────────┘       │ file_size        │       ├─────────────┤
-                      │ mime_type        │       │ image_id(FK)│
-                      │ width            │       │ tag_id (FK) │
-                      │ height           │       └─────────────┘
-                      │ created_at       │
-                      └──────────────────┘
+┌─────────────┐       ┌────────────────────────┐       ┌─────────────┐
+│   users     │       │        images          │       │    tags     │
+├─────────────┤       ├────────────────────────┤       ├─────────────┤
+│ id (PK)     │──1:N──│ id (PK)                │       │ id (PK)     │
+│ username    │       │ user_id (FK)           │──N:M──│ name        │
+│ email       │       │ filename               │       └─────────────┘
+│ password    │       │ original_name (源文件)  │              │
+│ created_at  │       │ custom_name  (用户取名) │       ┌──────┴──────┐
+│ updated_at  │       │ date_dir     (日期子目录)│       │ image_tags  │
+└─────────────┘       │ file_path    (原格式文件)│       ├─────────────┤
+                      │ thumbnail_path(缩略图)  │       │ image_id(FK)│
+                      │ file_size               │       │ tag_id (FK) │
+                      │ mime_type               │       └─────────────┘
+                      │ width                   │
+                      │ height                  │
+                      │ created_at              │
+                      └────────────────────────┘
 ```
+> **当前存储策略**：每张图存 2 个物理文件 — 原格式文件（兼展示+下载）+ 缩略图 WebP。无中间 WebP 副本。
 
 ---
 
@@ -300,17 +303,20 @@ new-picture-train/： (项目根目录){
 | 2.7 | `backend/src/main.py` | 注册图片路由，配置静态文件服务 |
 
 **验收标准**：
-- 上传图片后自动生成 WebP 格式 + 缩略图
+- 上传图片后保留原格式文件 + 生成缩略图 WebP（2 文件策略）
 - URL 上传也能正常工作
 - 图片列表按创建时间倒序返回
 - 删除图片同时删除物理文件
 
-**后续增强计划**：
-- 保留用户上传的原始格式文件（如 png），提供原图下载功能。需改动：
-  - `Image` 模型加 `original_path` 字段
-  - `save_upload_file()` 保留原格式副本
-  - `ImageResponse` 加 `original_url` 字段
-  - `delete_image()` 同步清理原图文件
+**已完成增强功能（突发需求实战）**：
+
+| 功能 | 涉及改动 |
+|------|---------|
+| 原图保留 + 下载 | `image.py` 用 `file_path` 存原格式（兼展示），`routers/images.py` 新增 `GET /{id}/download` |
+| 自定义图片名称 | `image.py` 加 `custom_name` 字段 + `display_name` 计算属性，上传时通过 `Form` 传入 |
+| 按日期目录存储 | `image_utils.py` 加 `get_date_upload_dir()`，`image.py` 加 `date_dir` 列 |
+| 图片搜索 | `image_service.py` 加 `search` 参数支持 `ilike` 模糊匹配，前端 `Gallery.vue` 加 500ms 防抖搜索框 |
+| `href`→`Axios blob` 下载 | `ImageCard.vue` 的 `<a>` 标签绕过 Axios 拦截器→401；改用 `downloadOriginalImage()` + `blob` 下载 |
 
 ---
 

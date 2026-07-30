@@ -14,62 +14,75 @@ import httpx
 from src.models.image import Image
 from src.models.user import User
 from src.utils.image_utils import (
-    generate_filename,
     get_image_dimensions,
-    compress_to_webp,
     generate_thumbnail,
     validate_image_format,
+    get_date_upload_dir,
 )
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__),"..", "uploads")
 
-def save_upload_file(upload_file: UploadFile) -> dict:
-    """保存上传文件，返回文件信息字典"""
+# Content-Type -> 扩展名映射表
+CONTENT_TYPE_MAP = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/bmp": ".bmp",
+    "image/webp": ".webp",
+    "image/tiff": ".tiff",
+}
+
+def save_upload_file(upload_file: UploadFile, custom_name: str | None = None) -> dict:
+    """保存上传文件(2 文件策略：原格式 + 缩略图)，返回文件信息字典"""
     # 校验文件格式
     try:
         validate_image_format(upload_file.filename)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    # date child directory
+    date_dir = get_date_upload_dir()
+    upload_subdir = os.path.join(UPLOAD_DIR, date_dir)
+    os.makedirs(upload_subdir, exist_ok=True)
 
-    # generate only filename
-    filename = generate_filename(upload_file.filename)
-    webp_name = f"{os.path.splitext(filename)[0]}.webp"
-    thumb_name = f"{os.path.splitext(filename)[0]}.thumb.webp"
-
-    #make sure the upload directory exits
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    #read file content
+    # read file content
     contents = upload_file.file.read()
     width, height = get_image_dimensions(contents)
-    #save original image
-    original_path = os.path.join(UPLOAD_DIR, webp_name)
+
+    # save original image (is display image too)
+    original_ext = os.path.splitext(upload_file.filename)[1].lower()
+    original_uuid_name = f"{uuid.uuid4().hex}{original_ext}"
+    original_path = os.path.join(upload_subdir, original_uuid_name)
     with open(original_path, "wb") as f:
         f.write(contents)
-    compress_to_webp(original_path, original_path)
 
-    #generate thumbnail
-    thumb_path = os.path.join(UPLOAD_DIR, thumb_name)
+    # generate thumbnail iamge
+    thumb_name = f"{uuid.uuid4().hex}_thumb.webp"
+    thumb_path = os.path.join(upload_subdir, thumb_name)
     generate_thumbnail(original_path, thumb_path)
 
     return{
-        "filename": webp_name,
+        "filename": original_uuid_name,
         "original_name": upload_file.filename,
+        "custom_name": custom_name,
+        "date_dir": date_dir,
         "file_size": os.path.getsize(original_path),
-        "mime_type": "image/webp",
+        "mime_type": f"image/{original_ext[1:]}",
         "width": width,
         "height": height,
         "file_path": original_path,
         "thumbnail_path": thumb_path,
     }
 
-def upload_file(db: session, file : UploadFile, user: User) -> Image:
+def upload_file(db: Session, file : UploadFile, user: User, custom_name: str | None = None) -> Image:
     """处理文件上传"""
-    file_info = save_upload_file(file)
+    file_info = save_upload_file(file, custom_name)
 
     image = Image(
         user_id=user.id,
         filename=file_info["filename"],
         original_name=file_info["original_name"],
+        custom_name=file_info["custom_name"],
+        date_dir=file_info["date_dir"],
         file_path=file_info["file_path"],
         thumbnail_path=file_info["thumbnail_path"],
         file_size=file_info["file_size"],
@@ -82,25 +95,10 @@ def upload_file(db: session, file : UploadFile, user: User) -> Image:
     db.refresh(image)
     return image
 
-
-# Content-Type → 扩展名 映射表
-CONTENT_TYPE_MAP = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/gif": ".gif",
-    "image/bmp": ".bmp",
-    "image/webp": ".webp",
-    "image/tiff": ".tiff",
-}
-
-
-async def upload_from_url(db: Session, url: str, user: User) -> Image:
+async def upload_from_url(db: Session, url: str, user: User, custom_name: str | None = None) -> Image:
     """从 URL 下载图片并上传"""
     async with httpx.AsyncClient() as client:
-        responses = await client.get(
-            url,
-            follow_redirects=True,
-        )
+        responses = await client.get(url, follow_redirects=True)
         if responses.status_code != 200:
             raise HTTPException(status_code=400, detail="无法下载该URL的图")
 
@@ -120,25 +118,23 @@ async def upload_from_url(db: Session, url: str, user: User) -> Image:
 
     # 打包下载内容作为类文件对象
     file_content = io.BytesIO(responses.content)
-
     # 创建伪 UploadFile（用 type() 避免类作用域的名字冲突）
     FakeUploadFile = type("FakeUploadFile", (), {"file": file_content, "filename": filename})
+    return upload_file(db, FakeUploadFile(), user, custom_name)
 
-    return upload_file(db, FakeUploadFile(), user)
-
-def get_user_image(db: Session, user: User, skip: int = 0, limit: int = 20) -> dict:
+def get_user_images(db: Session, user: User, skip: int = 0, limit: int = 20, search: str | None = None) -> dict:
     """获取用户的图片列表（分页）"""
-    total = db.query(Image).filter(Image.user_id == user.id).count()
-    images = (
-        db.query(Image)
-        .filter(Image.user_id == user.id)
-        .offset(skip)
-        .limit(limit)
-        .all()
-    )
+    query = db.query(Image).filter(Image.user_id == user.id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(
+            (Image.custom_name.ilike(pattern)) |
+            (Image.original_name.ilike(pattern))
+        )
+    
+    total = query.count()
+    images = query.order_by(Image.created_at.desc()).offset(skip).limit(limit).all()
     return {"total": total, "items": images}
-
-
 
 def get_image_detail(db: Session, image_id: int, user: User) -> Image:
     """获取单张图片详情"""
@@ -148,13 +144,12 @@ def get_image_detail(db: Session, image_id: int, user: User) -> Image:
     return image
 
 def delete_image(db:Session, image_id: int, user: User) -> None:
-    """删除图片"""
+    """删除图片 (数据库记录 + 物理文件)"""
     image = get_image_detail(db, image_id, user)
     #delete file
-    if os.path.exists(image.file_path):
-        os.remove(image.file_path)
-    if image.thumbnail_path and os.path.exists(image.thumbnail_path):
-        os.remove(image.thumbnail_path)
+    for path in [image.file_path, image.thumbnail_path]:
+        if path and os.path.exists(path):
+            os.remove(path)
     #delete db record
     db.delete(image)
     db.commit()

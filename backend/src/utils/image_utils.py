@@ -1,10 +1,16 @@
+
 """
 WebP 压缩、缩略图生成
 """
 import io
 import uuid
 import os
+from datetime import date
 from PIL import Image
+
+def get_date_upload_dir() -> str:
+    """返回按日期组织的上传子目录名，如 20260729"""
+    return date.today().strftime("%Y%m%d")
 
 def generate_filename(original_filename:str) -> str:
     """

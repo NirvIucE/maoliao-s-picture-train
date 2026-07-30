@@ -1,3 +1,4 @@
+
 import api from "./client";
 
 // interface 定义了每个接口的请求/响应结构，
@@ -6,6 +7,8 @@ export interface ImageItem {
     id: number
     filename: string
     original_name: string
+    custom_name: string | null
+    display_name: string 
     file_size: number
     mime_type: string
     width: number | null
@@ -23,6 +26,8 @@ export interface ImageListResponse {
 export interface ImageUploadRequest {
     id: number
     original_name: string
+    custom_name: string | null
+    display_name: string
     file_size: number
     width: number
     height: number
@@ -31,8 +36,10 @@ export interface ImageUploadRequest {
 }
 
 // 获取图片列表
-export function getImages(skip = 0, limit = 20): Promise<ImageListResponse> {
-    return api.get("/images", { params: { skip, limit}})
+export function getImages(skip = 0, limit = 20, search?: string): Promise<ImageListResponse> {
+    const params: Record<string, any> = { skip, limit }
+    if(search) params.search = search
+    return api.get("/images", { params: params })
 }
 
 // 获取图片详情
@@ -41,9 +48,10 @@ export function getImageDetail(imageId: number): Promise<ImageItem> {
 }
 
 // 上传图片文件
-export function uploadImage(file: File): Promise<ImageUploadRequest> {
+export function uploadImage(file: File, customName?: string): Promise<ImageUploadRequest> {
     const formData = new FormData()
     formData.append("file", file)
+    if(customName) formData.append("custom_name", customName)
     return api.post("/images/upload", formData, {
         headers: {
             "Content-Type": "multipart/form-data"
@@ -52,11 +60,30 @@ export function uploadImage(file: File): Promise<ImageUploadRequest> {
 }
 
 // URL上传
-export function uploadImageByUrl(url: string): Promise<ImageUploadRequest> {
-    return api.post("/images/upload-url", { url })
+export function uploadImageByUrl(url: string, customName?: string): Promise<ImageUploadRequest> {
+    return api.post("/images/upload-url", { url, custom_name: customName || null })
 }
 
 // 删除图片
 export function deleteImage(imageId: number): Promise<{ message: string }> {
     return api.delete(`/images/${imageId}`)
+}
+
+// 下载原图URL（直接打开即可触发浏览器下载）
+export function getDownloadUrl(imageId: number): string {
+    return `/api/images/${imageId}/download`
+}
+
+// 下载原图（Axios携带Token，以blob方式接收）
+export async function downloadOriginalImage(imageId: number, filename: string): Promise<void> {
+    const response = await api.get(`/images/${imageId}/download`, { responseType: "blob", } as any)
+    //创建临时URL触发浏览器下载
+    const url = window.URL.createObjectURL(new Blob ([response as any]))
+    const link = document.createElement("a")
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
 }
