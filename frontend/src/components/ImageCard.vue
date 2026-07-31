@@ -1,11 +1,11 @@
 
 <script setup lang="ts">
 import { ref } from "vue"
-import { deleteImage, getDownloadUrl, downloadOriginalImage } from "@/api/images"
+import { deleteImage, downloadOriginalImage } from "@/api/images"
 import type { ImageItem } from "@/api/images"
 
 const props = defineProps<{ image: ImageItem }>()
-const emit = defineEmits<{ deleted: [] }>()
+const emit = defineEmits<{ deleted: []; analyze: [image: ImageItem] }>()
 
 const showConfirm = ref(false)
 const deleting = ref(false)
@@ -45,6 +45,9 @@ async function handleDownload() {
             <div class="actions">
               <button class="btn-download" @click="handleDownload">
                 下载原图
+              </button>
+              <button class="btn-analyze" @click="emit('analyze', image)">
+                AI 分析
               </button>
               <button v-if="!showConfirm" class="btn-delete" @click="showConfirm = true">删除</button>
               <div v-else class="confirm">
@@ -106,6 +109,15 @@ async function handleDownload() {
   border-radius: 4px;
   cursor: pointer;
   text-decoration: none;
+  font-size: 13px;
+}
+.btn-analyze {
+  padding: 3px 10px;
+  background: #e6a23c;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
   font-size: 13px;
 }
 .btn-delete {

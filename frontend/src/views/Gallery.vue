@@ -1,3 +1,11 @@
+<!--
+ * @Author: NirvIucE 1750682685@qq.com
+ * @Date: 2026-07-28 15:45:53
+ * @LastEditors: NirvIucE 1750682685@qq.com
+ * @LastEditTime: 2026-07-31 16:02:48
+ * @FilePath: \new-picture-train\frontend\src\views\Gallery.vue
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+-->
 
 <!-- 图库页 -->
 <script setup lang="ts">
@@ -5,8 +13,21 @@ import { onMounted, ref } from 'vue';
 import { useImageStore } from '@/stores/images';
 import ImageCard from '@/components/ImageCard.vue';
 
+import AgentDialog from "@/components/AgentDialog.vue"
+import type { ImageItem } from "@/api/images"
+
+
 const imageStore = useImageStore()
 const searchInput = ref("")
+
+// AI 分析弹窗
+const analyzeVisible = ref(false)
+const analyzeImage = ref<ImageItem | null>(null)
+
+function onAnalyze(image: ImageItem) {
+  analyzeImage.value = image
+  analyzeVisible.value = true
+}
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -46,9 +67,17 @@ onMounted(() => {
         :key="image.id" 
         :image="image"
         @deleted="imageStore.fetchImages(0,20, searchInput || undefined)"
+        @analyze="onAnalyze"
       />
     </div>
     <p class="count">共显示 {{ imageStore.total }} 张图片</p>
+
+    <AgentDialog
+      :image="analyzeImage"
+      :visible="analyzeVisible"
+      @close="analyzeVisible = false"
+    />
+    
   </div>
 </template>
 

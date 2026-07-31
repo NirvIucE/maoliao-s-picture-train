@@ -16,6 +16,42 @@ DB_NAME = os.getenv("DB_NAME","cat_pic")
 # 拼接数据库连接 URL (SQLAlchemy 格式)
 DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
 
+# JWT 配置
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+
+# AI 模型配置
+PROVIDER_CONFIG = {
+    "deepseek": {
+        "api_key": os.getenv("DEEPSEEK_API_KEY"),
+        "base_url": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+    },
+    "siliconflow": {
+        "api_key": os.getenv("SILICONFLOW_API_KEY", ""),
+        "base_url": os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
+    },
+}
+
+# AI模型注册表
+def _parse_models() -> list[dict]:
+    """
+    解析 AI_MODELS 环境变量为模型列表
+    """
+    raw = os.getenv("AI_MODELS", "")
+    models = []
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        parts = item.split("|")
+        if len(parts) >= 4:
+            models.append({
+                "id": parts[0],
+                "name": parts[1],
+                "type": parts[2],
+                "provider": parts[3],
+            })
+    return models
+
+MODEL_REGISTRY = _parse_models()
