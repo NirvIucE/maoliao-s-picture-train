@@ -6,13 +6,17 @@ import os
 import io
 import uuid
 
-from fastapi import UploadFile, HTTPException, responses, status
-from sqlalchemy.orm import Session, session
+from fastapi import UploadFile, HTTPException, status
+from sqlalchemy.orm import Session
 
 import httpx
 
+from src.cache import cache_get, cache_set, cache_delete_pattern
+import asyncio
+
 from src.models.image import Image
 from src.models.user import User
+from src.schemas.image import ImageResponse
 from src.utils.image_utils import (
     get_image_dimensions,
     generate_thumbnail,
@@ -31,6 +35,9 @@ CONTENT_TYPE_MAP = {
     "image/webp": ".webp",
     "image/tiff": ".tiff",
 }
+
+# Cache TTL 常量
+IMAGE_LIST_TTL = 120 # 图片列表缓存 2 分钟
 
 def save_upload_file(upload_file: UploadFile, custom_name: str | None = None) -> dict:
     """保存上传文件(2 文件策略：原格式 + 缩略图)，返回文件信息字典"""
@@ -93,6 +100,9 @@ def upload_file(db: Session, file : UploadFile, user: User, custom_name: str | N
     db.add(image)
     db.commit()
     db.refresh(image)
+
+    # 上传后删除该用户的图片列表缓存（下次访问重新加载）
+    asyncio.create_task(cache_delete_pattern(f"images:user:{user.id}:*"))
     return image
 
 async def upload_from_url(db: Session, url: str, user: User, custom_name: str | None = None) -> Image:
@@ -122,8 +132,18 @@ async def upload_from_url(db: Session, url: str, user: User, custom_name: str | 
     FakeUploadFile = type("FakeUploadFile", (), {"file": file_content, "filename": filename})
     return upload_file(db, FakeUploadFile(), user, custom_name)
 
-def get_user_images(db: Session, user: User, skip: int = 0, limit: int = 20, search: str | None = None) -> dict:
-    """获取用户的图片列表（分页）"""
+async def get_user_images(db: Session, user: User, skip: int = 0, limit: int = 20, search: str | None = None) -> dict:
+    """获取用户的图片列表（分页 + 搜索 + Redis缓存）"""
+    # 只有无搜索、第一页才用缓存（搜索条件变化多，不缓存）
+    if not search and skip == 0:
+        cache_key = f"images:user:{user.id}:page0"
+        cached = await cache_get(cache_key)
+        if cached:
+            # 缓存命中：从 dict 重建 Pydantic 模型
+            cached["items"] = [ImageResponse(**item) for item in cached["items"]]
+            return cached
+    
+    # 缓存未命中 查数据库
     query = db.query(Image).filter(Image.user_id == user.id)
     if search:
         pattern = f"%{search}%"
@@ -134,7 +154,15 @@ def get_user_images(db: Session, user: User, skip: int = 0, limit: int = 20, sea
     
     total = query.count()
     images = query.order_by(Image.created_at.desc()).offset(skip).limit(limit).all()
-    return {"total": total, "items": images}
+    # ORM → Pydantic（便于 JSON 序列化存入缓存）
+    items = [ImageResponse.model_validate(img) for img in images]
+    result = {"total": total, "items": items}
+    # 缓存结果（存 model_dump 后的纯 dict）
+    if not search and skip == 0:
+        cache_data = {"total": total, "items": [item.model_dump() for item in items]}
+        await cache_set(cache_key, cache_data, IMAGE_LIST_TTL)
+
+    return result
 
 def get_image_detail(db: Session, image_id: int, user: User) -> Image:
     """获取单张图片详情"""
@@ -144,7 +172,7 @@ def get_image_detail(db: Session, image_id: int, user: User) -> Image:
     return image
 
 def delete_image(db:Session, image_id: int, user: User) -> None:
-    """删除图片 (数据库记录 + 物理文件)"""
+    """删除图片 (数据库记录 + 物理文件 + 缓存失效)"""
     image = get_image_detail(db, image_id, user)
     #delete file
     for path in [image.file_path, image.thumbnail_path]:
@@ -153,3 +181,7 @@ def delete_image(db:Session, image_id: int, user: User) -> None:
     #delete db record
     db.delete(image)
     db.commit()
+
+    # 清除后删缓存
+    asyncio.create_task(cache_delete_pattern(f"images:user:{user.id}:*"))
+

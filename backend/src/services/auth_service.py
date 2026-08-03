@@ -1,3 +1,4 @@
+
 """
 注册和登录的业务逻辑：
 """
@@ -8,6 +9,10 @@ from fastapi import HTTPException, status
 from src.models.user import User
 from src.schemas.user import UserCreate
 from src.utils.security import hash_password, verify_password, create_access_token
+
+from src.cache import cache_get, cache_set, cache_delete
+
+USER_INFO_TTL = 600 # 用户信息缓存10分钟
 
 def register_user(db: Session, user_data :UserCreate) -> User:
     """注册新用户"""
@@ -46,3 +51,21 @@ def authenticate_user(db: Session, username: str, password: str) -> dict:
         "access_token": token,
         "token_type": "bearer"
     }
+
+async def get_cached_user(db:Session, user_id: int) -> User | None:
+    """从缓存或数据库获取用户（用于 JWT 鉴权）"""
+    cache_key = f"user:{user_id}"
+    cached = await cache_get(cache_key)
+    if cached:
+        # 缓存命中：从字典重建 User 对象
+        return db.query(User).filter(User.id == user_id).first()
+
+    # 缓存未命中：查数据库 → 写入缓存
+    user = db.query(User).filter(User.id == user_id).first()
+    if user:
+        await cache_set(cache_key, {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+        }, USER_INFO_TTL)
+    return user

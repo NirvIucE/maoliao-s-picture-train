@@ -15,6 +15,7 @@ import mimetypes
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from src.database import engine, Base
 from src.routers import auth, users, images, agent
@@ -42,6 +43,12 @@ uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(uploads_dir, exist_ok=True)
 app.mount("/static/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
+# ── 生产模式：托管前端构建产物 ──
+frontend_dist = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")
+frontend_assets = os.path.join(frontend_dist, "assets")
+if os.path.isdir(frontend_assets):
+    app.mount("/assets", StaticFiles(directory=frontend_assets), name="frontend_assets")
+
 #注册路由
 app.include_router(auth.router)
 app.include_router(users.router)
@@ -51,3 +58,13 @@ app.include_router(agent.router)
 @app.get("/health")
 def health_check():
     return {"status":"ok", "message":"maoliao is running"}
+
+# SPA 回退：必须在所有 API 路由之后注册，否则会拦截 API 请求
+if os.path.isdir(frontend_assets):
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        index_path = os.path.join(frontend_dist, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Not Found"}, status_code=404)

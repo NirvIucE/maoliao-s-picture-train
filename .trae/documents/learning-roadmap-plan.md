@@ -2,7 +2,7 @@
  * @Author: NirvIucE 1750682685@qq.com
  * @Date: 2026-07-23 19:45:42
  * @LastEditors: NirvIucE 1750682685@qq.com
- * @LastEditTime: 2026-07-28 15:59:39
+ * @LastEditTime: 2026-08-04 01:30:00
  * @FilePath: \new-picture-train\.trae\documents\learning-roadmap-plan.md
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 -->
@@ -411,6 +411,16 @@ new-picture-train/： (项目根目录){
 - 支持流式显示分析结果（逐字输出）
 - 分析结果中建议的标签可以一键添加到图片
 
+**已完成增强功能（多厂商模型注册表）**：
+
+| 功能 | 涉及改动 |
+|------|---------|
+| 多厂商灵活切换 | `config.py` 新增 `PROVIDER_CONFIG` + `MODEL_REGISTRY`（从 `.env` 的 `AI_MODELS` 解析），`agent_service.py` 根据模型 ID 路由到对应厂商 |
+| 通用 OpenAI 兼容调用 | `stream_llm()` — DeepSeek / SiliconFlow 走同一套 `/v1/chat/completions`，只换 `base_url` + `api_key` |
+| 模型列表动态获取 | `GET /api/agent/models` — 前端下拉框从后端动态加载，`.env` 加一行新模型即自动出现 |
+| AgentDialog 模型选择 | 弹窗打开时过滤 `type: "vision"` 的模型供用户选择，不再硬编码模型 ID |
+| 图片 base64 编码 | `analyze_image()` 读取 `image_path` → base64 → `data:image/xxx;base64,...` 嵌入多模态请求 |
+
 ---
 
 ### 阶段 6：Agent 接入 — AI 对话助手
@@ -438,6 +448,15 @@ new-picture-train/： (项目根目录){
 - 对话支持流式打字效果
 - 聊天助手能回答关于图库的问题（如"我有多少张图片？"）
 
+**后续增强计划（待实现）**：
+
+| 功能 | 涉及改动 | 说明 |
+|------|---------|------|
+| AgentChat 从图库选择图片分析 | `AgentChat.vue` 加图库选择弹窗、`agent_service.py` 的 `chat()` 检测消息中的 `image_id` → 读取图片 → base64 → 嵌入多模态请求 | 用户可在对话中选中图库已有图片进行分析 |
+| AgentChat 本地上传图片分析 | `AgentChat.vue` 加 `<input type="file">`，先调 `POST /api/images/upload` 拿到 `image_id` 再分析 | 用户可直接在对话页面上传新图片分析 |
+| 基础图片编辑（裁剪/旋转/翻转） | 新增 `frontend/src/views/Edit.vue` + `backend/src/routers/images.py` 加 `POST /api/images/{id}/edit` | Pillow 纯后端处理，不依赖外部 API |
+| AI 图片编辑（背景移除、增强） | `rembg` 库本地抠图 + 视觉模型 AI 增强 | 需下载模型文件，作为后续迭代 |
+
 ---
 
 ### 阶段 7：缓存、优化与部署
@@ -457,12 +476,22 @@ new-picture-train/： (项目根目录){
 | 7.1 | `backend/src/cache.py` | Redis 连接 + `get_cache`, `set_cache` 工具函数 |
 | 7.2 | `backend/src/services/image_service.py` | 图片列表添加 Redis 缓存 |
 | 7.3 | `backend/src/services/auth_service.py` | 用户信息缓存 |
-| 7.4 | `frontend/` | 构建生产版本 (`npm run build`) + Nginx 配置 |
+| 7.4 | `frontend/` | 构建生产版本 (`npm run build`) + FastAPI 托管 SPA |
 
 **验收标准**：
-- Redis 缓存生效，二次查询明显快于首次
-- 删除图片后缓存同步失效
-- 前端能构建生产版本
+- ✅ Redis 缓存生效，二次查询明显快于首次
+- ✅ 删除图片后缓存同步失效
+- ✅ 前端能构建生产版本，FastAPI 单端口托管（`http://localhost:8000`）
+
+**已完成增强功能**：
+
+| 功能 | 涉及改动 |
+|------|---------|
+| Redis 异步连接池 | `cache.py` — `redis.asyncio` 懒加载 + JSON 序列化 + 通配符删除 |
+| 图片列表 Redis 缓存 | `image_service.py` — Cache-Aside 模式，ORM → Pydantic.model_dump 后存入，命中时从 dict 重建 |
+| 用户信息缓存 | `auth_service.py` — JWT 鉴权时优先读 Redis，TTL 10 分钟 |
+| 前端生产构建 | `npm run build` → `frontend/dist/`，`main.py` 中 SPA fallback 路由托管 |
+| 构建问题修复 | `tsconfig.json` 弃用警告、`env.d.ts` Vue 类型声明、`router/index.ts` 未使用变量 |
 
 ---
 

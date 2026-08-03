@@ -43,7 +43,7 @@ const router = createRouter({
 })
 
 // 导航首位：未登录跳转登录页
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, _from, next) => {
     const token = localStorage.getItem("token")
     if(to.meta.requiresAuth && !token){
         next("/login")
