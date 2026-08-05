@@ -492,6 +492,8 @@ new-picture-train/： (项目根目录){
 | 用户信息缓存 | `auth_service.py` — JWT 鉴权时优先读 Redis，TTL 10 分钟 |
 | 前端生产构建 | `npm run build` → `frontend/dist/`，`main.py` 中 SPA fallback 路由托管 |
 | 构建问题修复 | `tsconfig.json` 弃用警告、`env.d.ts` Vue 类型声明、`router/index.ts` 未使用变量 |
+| Redis 降级策略 | `cache.py` — PING 健康检查 + 30s 重试间隔，Redis 挂了零开销降级纯 DB，恢复自动切回 |
+| 清除 pycache 缓存 | 后端 `__pycache__/` 需定期清理，否则旧 `.pyc` 可能导致修改不生效 |
 
 ---
 
