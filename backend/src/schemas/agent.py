@@ -13,6 +13,7 @@ class ChatRequest(BaseModel):
     """对话请求"""
     messages:list[dict] # [{"role": "user", "content": "..."}]
     model: str = "deepseek-chat" # 默认用文本模型
+    image_id: int | None = None # 可选，关联图片
     
 class ModelInfo(BaseModel):
     """模型信息"""

@@ -2,7 +2,7 @@
  * @Author: NirvIucE 1750682685@qq.com
  * @Date: 2026-07-28 15:46:24
  * @LastEditors: NirvIucE 1750682685@qq.com
- * @LastEditTime: 2026-07-31 16:32:33
+ * @LastEditTime: 2026-08-07 17:30:06
  * @FilePath: \new-picture-train\frontend\src\views\AgentChat.vue
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 -->
@@ -10,10 +10,14 @@
 <script setup lang="ts">
 import { ref, nextTick } from "vue"
 import { getAvailableModels, chatStream, type ModelInfo } from "@/api/agent"
+import { uploadImage, type ImageItem } from "@/api/images"
+import GalleryPicker from "@/views/GalleryPicker.vue"
 
 interface Message {
   role: "user" | "assistant"
   content: string
+  imageUrl?: string
+  imageName?: string
 }
 
 const models = ref<ModelInfo[]>([])
@@ -22,6 +26,18 @@ const messages = ref<Message[]>([])
 const input = ref("")
 const sending = ref(false)
 const chatContainer = ref<HTMLElement | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
+
+// 附件图片状态
+const attachedImage = ref<{
+  id: number
+  thumbnail_url: string
+  display_name: string
+} | null>(null)
+const uploadLoading = ref(false)
+let previousModel = "" // 记住上传前选择的模型 
+
+const galleryVisible = ref(false) //图库弹窗显隐
 
 // 加载可用模型
 async function loadModels() {
@@ -37,12 +53,85 @@ async function loadModels() {
 
 loadModels()
 
+// 触发文件选择
+function triggerUpload() {
+  fileInput.value?.click()
+}
+
+// 文件选择 + 上传
+async function handleFileSelected(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if(!file) return
+
+  uploadLoading.value = true
+  try {
+    const result = await uploadImage(file)
+    attachedImage.value = {
+      id: result.id,
+      thumbnail_url: result.thumbnail_url,
+      display_name: result.display_name,
+    }
+    // 自动切换到视觉模型
+    const visionModel = models.value.find((m) => m.type === "vision")
+    if (visionModel){
+      previousModel = selectedModel.value
+      selectedModel.value = visionModel.id
+    }
+  }
+  catch (err : any){
+    alert(err.response?.data?.detail || "上传失败")
+  }
+  finally {
+    uploadLoading.value = false
+    target.value = ""  // 清空，允许重复选同一文件
+  }
+}
+
+// 移除附件
+function removeAttachedImage() {
+  attachedImage.value = null
+  if (previousModel) {
+    selectedModel.value = previousModel
+    previousModel = ""
+  }
+}
+
+// 从图库弹窗选择图
+function onGallerySelect(image: ImageItem) {
+  attachedImage.value = {
+    id: image.id,
+    thumbnail_url: image.thumbnail_url || image.image_url || "",
+    display_name: image.display_name,
+  }
+  galleryVisible.value = false
+  // 自动切换到视觉模型
+  const visionModel = models.value.find((m) => m.type === "vision")
+  if(visionModel){
+    previousModel = selectedModel.value
+    selectedModel.value = visionModel.id
+  }
+}
+
 async function sendMessage() {
   const text = input.value.trim()
-  if (!text || sending.value) return
+  const hasImage = attachedImage.value !== null
+  if ((!text && !hasImage) || sending.value) return
+
+  // 构建用户消息 (含缩略图)
+  const userMsg : Message= {
+    role: "user",
+    content: text || "对用户图片进行分析",
+  }
+  if (hasImage){
+    userMsg.imageUrl = attachedImage.value!.thumbnail_url
+    userMsg.imageName = attachedImage.value!.display_name
+  }
+  messages.value.push(userMsg)
 
   input.value = ""
-  messages.value.push({ role: "user", content: text })
+  const imageId = attachedImage.value?.id
+  attachedImage.value = null // 发生之后清除附件
 
   // 添加空的 assistant 消息用于流式追加
   messages.value.push({ role: "assistant", content: "" })
@@ -52,7 +141,8 @@ async function sendMessage() {
   try {
     const stream = chatStream(
       messages.value.slice(0, -1).map((m) => ({ role: m.role, content: m.content })),
-      selectedModel.value
+      selectedModel.value,
+      imageId
     )
     for await (const chunk of stream) {
       messages.value[assistantIndex].content += chunk
@@ -71,6 +161,7 @@ async function sendMessage() {
 
 function clearChat() {
   messages.value = []
+  attachedImage.value = null 
 }
 </script>
 
@@ -91,28 +182,72 @@ function clearChat() {
     <div ref="chatContainer" class="chat-messages">
       <div v-if="messages.length === 0" class="empty">
         <p>你好！我是猫里奥 AI 助手。</p>
-          <p>可以问我关于你图库的问题，或者聊点别的。</p>
+          <p>可以问我关于图库的问题，或者上传图片让我帮你分析。</p>
       </div>
       <div
           v-for="(msg, i) in messages"
           :key="i"
           :class="['message', msg.role === 'user' ? 'user' : 'assistant']"
         >
-        <div class="msg-content">{{ msg.content }}</div>
+        <div class="msg-content">
+          <img
+            v-if="msg.imageUrl"
+            :src="msg.imageUrl"
+            class="msg-image" 
+          />
+          <div>{{ msg.content }}</div>
+        </div>
       </div>
     </div> 
-
-    <div class="chat-input">
-      <input
-        v-model="input"
-        type="text"
-        placeholder="输入消息..."
-        :disabled="sending"
-        @keyup.enter="sendMessage"
-      />
-      <button :disabled="!input.trim() || sending" @click="sendMessage">
-        {{ sending ? "发送中..." : "发送" }}
-      </button>
+    <!-- 图库选图弹窗 -->
+    <GalleryPicker
+      :visible="galleryVisible"
+      @close="galleryVisible = false"
+      @select="onGallerySelect"
+    />
+    <!-- 隐藏文件选择器 -->
+    <input
+      ref="fileInput"
+      type="file"
+      accept="image/*"
+      style="display: none"
+      @change="handleFileSelected"
+    />
+    <div class="chat-input-area">
+      <!-- 附件预览条 -->
+      <div v-if="attachedImage" class="image-preview">
+        <img :src="attachedImage.thumbnail_url" />
+        <span class="preview-name">{{ attachedImage.display_name }}</span>
+        <button class="btn-remove" @click="removeAttachedImage" :disabled="sending">✕</button>
+      </div>
+      <div class="chat-input">
+        <button
+          class="btn-upload"
+          @click="triggerUpload"
+          :disabled="sending || uploadLoading"
+          title="上传新图片分析"
+        >
+          {{ uploadLoading ? "⏳" : "本地上传图片" }}
+        </button>
+        <button
+          class="btn-upload"
+          @click="galleryVisible = true"
+          :disabled="sending"
+          title="从图库选择图片"
+        >
+          从图库选图
+        </button>
+        <input
+          v-model="input"
+          type="text"
+          placeholder="输入消息，或上传图片让我分析..."
+          :disabled="sending"
+          @keyup.enter="sendMessage"
+        />
+        <button :disabled="(!input.trim() && !attachedImage) || sending" @click="sendMessage">
+          {{ sending ? "发送中..." : "发送" }}
+        </button>
+      </div>
     </div>
   </div> 
 </template>
@@ -177,6 +312,60 @@ function clearChat() {
   background: #f0f0f0;
   color: #303133;
 }
+.msg-image {
+  display: block;
+  max-width: 200px;
+  max-height: 150px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  object-fit: cover;
+}
+.chat-input-area {
+  border-top: 1px solid #e4e7ed;
+}
+.image-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  margin-bottom: 4px;
+}
+.image-preview img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+}
+.preview-name {
+  flex: 1;
+  font-size: 13px;
+  color: #606266;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.btn-remove {
+  border: none;
+  background: none;
+  font-size: 16px;
+  color: #909399;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.btn-remove:hover { color: #f56c6c; }
+.btn-remove:disabled { cursor: not-allowed; }
+.btn-upload {
+  padding: 10px 12px;
+  background: #f0f0f0;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+.btn-upload:hover { background: #e0e0e0; }
+.btn-upload:disabled { opacity: 0.5; cursor: not-allowed; }
 .chat-input {
   display: flex;
   gap: 10px;

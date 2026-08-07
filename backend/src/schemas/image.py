@@ -42,3 +42,4 @@ class ImageUploadResponse(BaseModel):
     height: int
     image_url: str
     thumbnail_url: str
+

@@ -4,11 +4,20 @@ Agent 服务：图片分析 + 对话助手
 
 import base64
 import json
-from pyexpat import model
 from typing import AsyncGenerator
 import httpx
+
 from fastapi import HTTPException, status
+
+from sqlalchemy.orm import Session
+
 from src.config import PROVIDER_CONFIG, MODEL_REGISTRY
+from src.services import image_service
+
+def _encode_image(image_path: str) -> str:
+    """读取本地图片文件并编码为 base64 字符串"""
+    with open(image_path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
 
 def _get_model_config(model_id: str) -> tuple[dict, dict]:
     """根据模型 ID 查找模型描述 + 厂商配置，找不到抛异常"""
@@ -99,9 +108,23 @@ async def analyze_image(image_path: str, image_mime: str, model_id: str) -> Asyn
         yield chunk
 
 async def chat(
-    messages: list[dict], model_id: str
+    messages: list[dict], 
+    model_id: str,
+    image=None,
 ) -> AsyncGenerator[str, None]:
-    """多轮对话（不附加图片，纯文本）"""
+    """多轮对话，支持附带图片进行视觉分析"""
+    if image is not None:
+        # 读取图片文件 → base64
+        img_base64 = _encode_image(image.file_path)
+        # 在当前 messages 最后追加一个多模态 user message
+        messages = messages + [{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:{image.mime_type};base64,{img_base64}"}},
+                {"type": "text", "text": "按prompt分析或处理该图片"}
+            ]
+        }]
+
     async for chunk in stream_llm(model_id, messages):
         yield chunk
 

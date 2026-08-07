@@ -2,7 +2,7 @@
  * @Author: NirvIucE 1750682685@qq.com
  * @Date: 2026-07-23 19:45:42
  * @LastEditors: NirvIucE 1750682685@qq.com
- * @LastEditTime: 2026-08-04 01:30:00
+ * @LastEditTime: 2026-08-05 22:54:57
  * @FilePath: \new-picture-train\.trae\documents\learning-roadmap-plan.md
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 -->
@@ -456,7 +456,7 @@ new-picture-train/： (项目根目录){
 | AgentChat 本地上传图片分析 | `AgentChat.vue` 加 `<input type="file">`，先调 `POST /api/images/upload` 拿到 `image_id` 再分析 | 用户可直接在对话页面上传新图片分析 |
 | 基础图片编辑（裁剪/旋转/翻转） | 新增 `frontend/src/views/Edit.vue` + `backend/src/routers/images.py` 加 `POST /api/images/{id}/edit` | Pillow 纯后端处理，不依赖外部 API |
 | AI 图片编辑（背景移除、增强） | `rembg` 库本地抠图 + 视觉模型 AI 增强 | 需下载模型文件，作为后续迭代 |
-
+想再加还未具体设计：双击图库中的图片可打开该图片的详情页，页面展示详细图片，可在图片详情页中做基础编辑图片，简单涂鸦，AI图片编辑等，可选择保存为覆盖原来的图片或者另存为新图片于图库中
 ---
 
 ### 阶段 7：缓存、优化与部署

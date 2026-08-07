@@ -13,6 +13,7 @@ import httpx
 
 from src.cache import cache_get, cache_set, cache_delete_pattern
 import asyncio
+from PIL import Image as PILImage
 
 from src.models.image import Image
 from src.models.user import User
