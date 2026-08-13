@@ -1,12 +1,14 @@
 
 <script setup lang="ts">
 import { ref } from "vue"
+import { useRouter } from "vue-router"
 import { deleteImage, downloadOriginalImage } from "@/api/images"
 import type { ImageItem } from "@/api/images"
 
 const props = defineProps<{ image: ImageItem }>()
 const emit = defineEmits<{ deleted: []; analyze: [image: ImageItem] }>()
 
+const router = useRouter()
 const showConfirm = ref(false)
 const deleting = ref(false)
 
@@ -24,10 +26,14 @@ async function handleDelete() {
 async function handleDownload() {
   await downloadOriginalImage(props.image.id, props.image.original_name)
 }
+
+function goDetail() {
+    router.push(`/detail/${props.image.id}`)
+}
 </script>
 
 <template>
-    <div class="card">
+    <div class="card" @dblclick="goDetail">
         <div class="card-image">
             <img 
                 :src="image.thumbnail_url || image.image_url || ''" 
@@ -42,7 +48,7 @@ async function handleDownload() {
             <p class="size">
                 {{ (image.file_size / 1024).toFixed(1) }} KB
             </p>
-            <div class="actions">
+            <div class="actions" @dblclick.stop>
               <button class="btn-download" @click="handleDownload">
                 下载原图
               </button>

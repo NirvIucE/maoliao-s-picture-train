@@ -87,3 +87,37 @@ export async function downloadOriginalImage(imageId: number, filename: string): 
     document.body.removeChild(link)
     window.URL.revokeObjectURL(url)
 }
+
+// 编辑操作类型
+export interface EditOperation {
+    type: "rotate" | "flip" | "crop"
+    angle?: number          // rotate: 90/180/270
+    direction?: string      // flip: "horizontal"/"vertical"
+    left?: number           // crop
+    top?: number
+    right?: number
+    bottom?: number
+}
+
+// 编辑图片（裁剪/旋转/翻转）
+export function editImage(
+    imageId: number,
+    operations: EditOperation[],
+    saveMode: "overwrite" | "new",
+    customName?: string
+): Promise<ImageUploadRequest> {
+    return api.post(`/images/${imageId}/edit`, {
+        operations,
+        save_mode: saveMode,
+        custom_name: customName || null
+    })
+}
+
+// 替换图片（覆盖原图，用于 AI 抠图结果）
+export function replaceImage(imageId: number, file: Blob): Promise<ImageUploadRequest> {
+    const formData = new FormData()
+    formData.append("file", file)
+    return api.post(`/images/${imageId}/replace`, formData, {
+        headers: { "Content-Type": "multipart/form-data" }
+    })
+}

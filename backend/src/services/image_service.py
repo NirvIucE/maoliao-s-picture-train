@@ -186,3 +186,116 @@ def delete_image(db:Session, image_id: int, user: User) -> None:
     # 清除后删缓存
     asyncio.create_task(cache_delete_pattern(f"images:user:{user.id}:*"))
 
+def edit_image(db: Session,
+    image_id: int,
+    operations: list,
+    save_mode: str,
+    custom_name: str | None,
+    user: User,
+) -> Image:
+    """编辑图片：按顺序执行裁剪/旋转/翻转，支持覆盖或另存"""
+    image = get_image_detail(db, image_id, user)
+    img = PILImage.open(image.file_path)
+
+    # 按顺序应用所有编辑操作
+    for op in operations:
+        if op.type == "rotate":
+            # Pillow 默认逆时针，取反转为顺时针
+            img = img.rotate(-op.angle, expand=True)
+        elif op.type == "flip":
+            if op.direction == "horizontal":
+                img = img.transpose(PILImage.Transpose.FLIP_LEFT_RIGHT)
+            elif op.direction == "vertical":
+                img = img.transpose(PILImage.Transpose.FLIP_TOP_BOTTOM)
+        elif op.type == "crop":
+            img = img.crop((op.left, op.top, op.right, op.bottom))
+        
+    if save_mode == "overwrite":
+        # 覆盖原图 + 重生成缩略图
+        img.save(image.file_path)
+        image.width, image.height = img.size
+        image.file_size = os.path.getsize(image.file_path)
+        generate_thumbnail(image.file_path, image.thumbnail_path)
+        db.commit()
+        db.refresh(image)
+        asyncio.create_task(cache_delete_pattern(f"images:user:{user.id}:*"))
+        return image
+    else:
+        # 另存为新图片
+        date_dir = get_date_upload_dir()
+        upload_subdir = os.path.join(UPLOAD_DIR, date_dir)
+        os.makedirs(upload_subdir, exist_ok=True)
+
+        ext = os.path.splitext(image.filename)[1] or ".jpg"
+        new_filename = f"{uuid.uuid4().hex}{ext}"
+        new_path = os.path.join(upload_subdir, new_filename)
+        img.save(new_path)
+
+        thumb_name = f"{uuid.uuid4().hex}_thumb.webp"
+        thumb_path = os.path.join(upload_subdir, thumb_name)
+        generate_thumbnail(new_path, thumb_path)
+
+        new_image = Image(
+            user_id=user.id,
+            filename=new_filename,
+            original_name=image.original_name,
+            custom_name=custom_name or f"{image.display_name}(编辑)",
+            date_dir=date_dir,
+            file_path=new_path,
+            thumbnail_path=thumb_path,
+            file_size=os.path.getsize(new_path),
+            mime_type=image.mime_type,
+            width=img.size[0],
+            height=img.size[1],
+        )
+
+        db.add(new_image)
+        db.commit()
+        db.refresh(new_image)
+        asyncio.create_task(cache_delete_pattern(f"images:user:{user.id}:*"))
+        return new_image
+
+def replace_image(db: Session, image_id: int, file: UploadFile, user: User) -> Image:
+    """用新图片文件覆盖原图（保留原记录，更新文件+缩略图+尺寸）"""
+
+    image = get_image_detail(db, image_id, user)
+
+    # 校验新文件格式
+    try:
+        validate_image_format(file.filename)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    contents = file.file.read()
+    width, height = get_image_dimensions(contents)
+
+    new_ext = os.path.splitext(file.filename)[1].lower()
+    old_ext = os.path.splitext(image.file_path)[1].lower()
+
+    if new_ext != old_ext:
+        # 扩展名变了（如 JPG → PNG 抠图），删除旧文件，用新路径
+        if os.path.exists(image.file_path):
+            os.remove(image.file_path)
+        new_filename = f"{uuid.uuid4().hex}{new_ext}"
+        new_path = os.path.join(os.path.dirname(image.file_path), new_filename)
+        image.filename = new_filename
+        image.mime_type = f"image/{new_ext[1:]}"
+        image.file_path = new_path
+    else:
+        new_path = image.file_path
+
+    # 写入新文件
+    with open(new_path, "wb") as f:
+        f.write(contents)
+
+    # 重生成缩略图（覆盖原缩略图路径）
+    generate_thumbnail(new_path, image.thumbnail_path)
+
+    image.width = width
+    image.height = height
+    image.file_size = os.path.getsize(new_path)
+
+    db.commit()
+    db.refresh(image)
+    asyncio.create_task(cache_delete_pattern(f"images:user:{user.id}:*"))
+    return image

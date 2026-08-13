@@ -21,6 +21,7 @@ env/
 # 上传文件
 uploads/
 *.webp
+git上找到的AI图像编辑纯前端示例项目/
 
 # 前端
 node_modules/

@@ -2,7 +2,7 @@
  * @Author: NirvIucE 1750682685@qq.com
  * @Date: 2026-07-23 19:45:42
  * @LastEditors: NirvIucE 1750682685@qq.com
- * @LastEditTime: 2026-08-05 22:54:57
+ * @LastEditTime: 2026-08-12 18:11:00
  * @FilePath: \new-picture-train\.trae\documents\learning-roadmap-plan.md
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 -->
@@ -26,6 +26,7 @@
    - [阶段 5：Agent 接入 — AI 图片分析](#阶段-5agent-接入--ai-图片分析)
    - [阶段 6：Agent 接入 — AI 对话助手](#阶段-6agent-接入--ai-对话助手)
    - [阶段 7：缓存、优化与部署](#阶段-7缓存优化与部署)
+   - [阶段 8：图片详情与 AI 编辑](#阶段8图片详情与ai编辑)
 5. [每个阶段的标准流程](#5-每个阶段的标准流程)
 6. [关键约定](#6-关键约定)
 
@@ -448,15 +449,7 @@ new-picture-train/： (项目根目录){
 - 对话支持流式打字效果
 - 聊天助手能回答关于图库的问题（如"我有多少张图片？"）
 
-**后续增强计划（待实现）**：
 
-| 功能 | 涉及改动 | 说明 |
-|------|---------|------|
-| AgentChat 从图库选择图片分析 | `AgentChat.vue` 加图库选择弹窗、`agent_service.py` 的 `chat()` 检测消息中的 `image_id` → 读取图片 → base64 → 嵌入多模态请求 | 用户可在对话中选中图库已有图片进行分析 |
-| AgentChat 本地上传图片分析 | `AgentChat.vue` 加 `<input type="file">`，先调 `POST /api/images/upload` 拿到 `image_id` 再分析 | 用户可直接在对话页面上传新图片分析 |
-| 基础图片编辑（裁剪/旋转/翻转） | 新增 `frontend/src/views/Edit.vue` + `backend/src/routers/images.py` 加 `POST /api/images/{id}/edit` | Pillow 纯后端处理，不依赖外部 API |
-| AI 图片编辑（背景移除、增强） | `rembg` 库本地抠图 + 视觉模型 AI 增强 | 需下载模型文件，作为后续迭代 |
-想再加还未具体设计：双击图库中的图片可打开该图片的详情页，页面展示详细图片，可在图片详情页中做基础编辑图片，简单涂鸦，AI图片编辑等，可选择保存为覆盖原来的图片或者另存为新图片于图库中
 ---
 
 ### 阶段 7：缓存、优化与部署
@@ -494,6 +487,196 @@ new-picture-train/： (项目根目录){
 | 构建问题修复 | `tsconfig.json` 弃用警告、`env.d.ts` Vue 类型声明、`router/index.ts` 未使用变量 |
 | Redis 降级策略 | `cache.py` — PING 健康检查 + 30s 重试间隔，Redis 挂了零开销降级纯 DB，恢复自动切回 |
 | 清除 pycache 缓存 | 后端 `__pycache__/` 需定期清理，否则旧 `.pyc` 可能导致修改不生效 |
+
+---
+---
+
+### 阶段8：图片详情与AI编辑
+
+**学习目标**：Fabric.js 画布操作、AI 区域编辑（遮罩+提示词）、浏览器端 AI 抠图、基础图片编辑。
+
+**我会讲解的内容**：
+- Fabric.js 在 Vue3 中的集成方式（`onMounted` 初始化 canvas）
+- 图层与遮罩的概念：如何用画笔/矩形生成遮罩 → AI 只修改遮罩区域
+- `@imgly/background-removal` 浏览器端 AI 抠图的原理与使用
+- 编辑操作的序列化（前端累积操作 → 一次性提交后端）
+- 保存策略：覆盖原图 vs 另存为新图的取舍
+
+**参考项目**：`git上找到的AI图像编辑纯前端示例项目/`（React + Fabric.js + @imgly/background-removal），架构分析见下方 8.4 节。
+
+#### 8.0 架构分工决策（重要）
+
+混合架构：轻操作走后端参数化接口，重操作走前端处理，AI 区域编辑因密钥约束走后端。
+
+| 功能 | 处理位置 | 数据流向 | 保存方式 |
+|------|---------|---------|---------|
+| **基础编辑**（旋转/翻转/裁剪） | 前端 Canvas 预览 + **后端 Pillow 执行** | 前端传 `operations` 参数（非图片） | `POST /{id}/edit` 覆盖/另存 |
+| **AI 抠图** | **纯前端** `@imgly/background-removal` | 浏览器端模型推理，输出透明 PNG blob | 上传 blob 保存（见下方保存链路） |
+| **AI 区域编辑** | 前端生成遮罩 + **后端调视觉模型** | 前端传 遮罩+原图+指令，后端流式返回结果图 | 后端保存结果（见下方保存链路） |
+
+**为什么这样分工**：
+- 基础编辑用 Pillow 是毫秒级，并发无压力，传参数比传整图更高效
+- AI 抠图是重量级模型推理，放前端省后端算力 + 免去 rembg 模型下载
+- AI 区域编辑必须后端：大模型 API Key 不能暴露在前端
+
+**保存策略（已确定）**：所有编辑场景统一提供 `[覆盖保存]` + `[另存新图]` 两个选项。
+
+| 场景 | 覆盖原图 | 另存新图 |
+|------|---------|---------|
+| 基础编辑 | `POST /{id}/edit` `save_mode=overwrite` | `POST /{id}/edit` `save_mode=new` |
+| AI 抠图（前端 blob） | `POST /{id}/replace`（新增） | `POST /images/upload`（复用） |
+| AI 区域编辑（后端结果图） | `POST /{id}/replace`（新增） | 后端直接存新记录 |
+
+**决策**：新增 `POST /{id}/replace` 接口（接收 multipart 图片文件），用于 AI 抠图/区域编辑结果的"覆盖原图"。覆盖时保留原记录（id、名称、标签、关联），仅重写文件 + 重生成缩略图 + 更新宽高/大小。
+
+#### 8.1 AgentChat 从图库选择图片分析
+
+✅ **已完成**（后端 chat() 支持 image_id）：
+
+| 改动 | 文件 | 说明 |
+|------|------|------|
+| ChatRequest 加 image_id | `backend/src/schemas/agent.py` | `image_id: int \| None = None` |
+| chat() 支持多模态 | `backend/src/services/agent_service.py` | 有 image_id 时查图片→base64→追加多模态 message |
+| /chat 端点前置校验 | `backend/src/routers/agent.py` | 查图片存在性 + 模型类型校验（text 模型拒绝带图请求） |
+
+✅ **已完成**（前端本地上传图片分析）：
+
+| 改动 | 文件 | 说明 |
+|------|------|------|
+| 本地上传按钮 | `frontend/src/views/AgentChat.vue` | 📎按钮 → `<input type="file">` → `uploadImage()` → 拿 `image_id` |
+| 附件预览 + 自动切视觉模型 | 同上 | 缩略图预览条 + 模型选择器锁定 + 移除恢复 |
+| chatStream 加 imageId 参数 | `frontend/src/api/agent.ts` | 可选参数，发送时拼入 `body.image_id` |
+
+**待实现**：图库选图弹窗集成
+
+| 改动 | 文件 | 说明 |
+|------|------|------|
+| GalleryPicker 弹窗组件 | `frontend/src/views/GalleryPicker.vue`（新建） | 遮罩弹窗 + 图片网格 + 搜索防抖，点击选中 emit |
+| AgentChat 集成选图按钮 | `frontend/src/views/AgentChat.vue` | 输入区加"选图"按钮 → 打开弹窗 → 选中后走同一套 attachedImage 流程 |
+
+#### 8.2 图片编辑与保存接口（后端）
+
+**待实现**（代码已给出，待应用）：
+
+| 改动 | 文件 | 说明 |
+|------|------|------|
+| EditOperation + EditImageRequest | `backend/src/schemas/image.py` | `type: rotate/flip/crop` + 对应参数 |
+| edit_image() 服务函数 | `backend/src/services/image_service.py` | Pillow 按序执行操作：旋转→翻转→裁剪；覆盖=重写原文件+缩略图；另存=新文件+新记录 |
+| replace_image() 服务函数 | `backend/src/services/image_service.py` | 接收新图片文件，覆盖原 file_path + 重生成缩略图 + 更新尺寸，保留原记录 |
+| POST /{id}/edit 端点 | `backend/src/routers/images.py` | 接收操作列表 + save_mode，返回 ImageUploadResponse |
+| POST /{id}/replace 端点 | `backend/src/routers/images.py` | 接收 multipart 图片文件，覆盖原图，返回 ImageUploadResponse |
+
+**API 协议**：
+
+```json
+POST /api/images/{id}/edit
+{
+  "operations": [
+    {"type": "rotate", "angle": 90},
+    {"type": "flip", "direction": "horizontal"},
+    {"type": "crop", "left": 100, "top": 50, "right": 500, "bottom": 450}
+  ],
+  "save_mode": "overwrite",
+  "custom_name": "编辑后的图"
+}
+```
+
+**replace 接口（AI 结果覆盖原图）**：
+
+```
+POST /api/images/{id}/replace
+Content-Type: multipart/form-data
+Body: file = 编辑后的图片文件
+
+后端逻辑：覆盖原 file_path → 重生成缩略图 → 更新 width/height/file_size → 保留原记录
+```
+
+#### 8.3 图片详情页 Detail.vue
+
+**目标**：双击图库中的图片 → 进入详情页，支持基础编辑 + AI 编辑，可选择覆盖或另存。
+
+**设计布局**：
+┌──────────────────────────────────────────┐
+│  ← 返回图库      图片详情                   │
+├──────────────┬───────────────────────────┤
+│              │  工具栏:                   │
+│  Fabric.js   │  [旋转] [翻转] [裁剪]       │
+│  画布        │  画笔: [选择][画笔][矩形]    │
+│  (涂鸦+预览) │  画笔大小: [=====]           │
+│              │  [AI抠图]                  │
+│              │                           │
+│              │  图片信息:                 │
+│              │  名称 / 尺寸 / 大小 / 日期  │
+│              │                           │
+│              │  AI 编辑:                  │
+│              │  [输入指令: "换成蓝天..." ] │
+│              │  [AI区域编辑]              │
+├──────────────┴───────────────────────────┤
+│     [下载]          [覆盖保存] [另存为新]    │
+└──────────────────────────────────────────┘
+
+**待实现**：
+
+| 步骤 | 文件 | 内容 |
+|------|------|------|
+| 8.3.1 | `frontend/src/router/index.ts` | 新增路由 `{ path: "/detail/:id", component: Detail }` |
+| 8.3.2 | `frontend/src/components/ImageCard.vue` | 加 `@dblclick` → `router.push("/detail/" + id)` |
+| 8.3.3 | `frontend/src/api/images.ts` | 新增 `editImage(id, operations, saveMode, customName?)` + `replaceImage(id, blob)` |
+| 8.3.4 | `frontend/src/views/Detail.vue`（新建） | 核心编辑页，见下方详细设计 |
+| 8.3.5 | `npm install fabric @imgly/background-removal` | 安装依赖 |
+
+**Detail.vue 核心逻辑设计**：
+- onMounted → getImageDetail(id) → 加载原图到 Fabric.js canvas
+- 用户操作（旋转/翻转/画笔涂鸦）→ 仅 Canvas 前端实时预览，不请求后端
+- 用户选择"AI抠图" → @imgly/background-removal 浏览器端处理 → 替换 canvas 内容
+- 用户选择"AI区域编辑"：
+a. 从 canvas 提取遮罩（画笔/矩形选中区域 → 白色遮罩图）
+b. 从 canvas 提取原图 base64
+c. 发送遮罩+原图+提示词 → POST /api/agent/chat → SSE 流式编辑
+- 用户点击保存（两个按钮，按编辑类型路由）：
+a. [覆盖保存]
+   - 基础编辑 → POST /api/images/{id}/edit save_mode=overwrite
+   - AI 抠图/AI区域编辑 → POST /api/images/{id}/replace（传结果图 blob）
+b. [另存新图]
+   - 基础编辑 → POST /api/images/{id}/edit save_mode=new
+   - AI 抠图 → POST /api/images/upload（传结果图 blob）
+   - AI 区域编辑 → 后端已存新记录，前端跳转查看
+
+#### 8.4 AI 抠图与区域编辑（参考项目思路 + 混合架构落地）
+
+**参考项目关键发现**：
+
+| 功能 | 参考项目实现方式 | 对我们的价值 |
+|------|-----------------|-------------|
+| **AI 区域编辑（核心亮点）** | 画笔/矩形框选区域 → 生成二值遮罩 → 将遮罩图+原图作为两张 base64 发送给视觉模型 → 模型只修改遮罩覆盖区域 | **应采纳**：取代简单的旋转翻转，实现"涂鸦指定区域 + 自然语言描述修改" |
+| **AI 抠图** | `@imgly/background-removal` 纯前端 npm 包，第一次加载下载模型（~40MB），之后缓存 | **建议采纳**：比后端 `rembg` 方案更简单，零后端依赖 |
+| **套索工具** | 自由/多边形/磁性套索三种模式 | 可后期增强，初期用画笔+矩形即可 |
+| **图层系统** | 多层叠加、排序、显隐、锁定 | 对 MVP 过重，初期简化：画布 = 原图层 + 遮罩层 |
+| **Fabric.js** | 无限画布、缩放平移、撤销重做 | Vue3 中通过 `onMounted` 初始化，API 不变 |
+
+**AI 区域编辑的 Prompt 设计**：
+
+```json
+系统指令（构造给视觉模型的 messages）:
+user: [
+  { type: "text", text: "请严格按照遮罩区域编辑图片。白色区域是需要修改的部分，黑色区域保持原样。" + user_input },
+  { type: "image_url", image_url: { url: "data:image/png;base64,<原图>" } },
+  { type: "image_url", image_url: { url: "data:image/png;base64,<遮罩图>" } }
+]
+```
+
+> **注意**：这需要视觉模型同时理解两张图片（原图+遮罩）和一条指令。不是所有视觉模型都能很好地执行遮罩编辑，需实测验证可用模型。
+
+**验收标准**：
+- 双击图库图片进入详情页，能看到原图
+- 能在画布上涂鸦/画矩形标记区域
+- 点击"AI 区域编辑"后 AI 能修改选中区域（如"把背景变成蓝天"）
+- AI 抠图能正确移除背景（透明 PNG）
+- 基础旋转/翻转/裁剪操作正常
+- 覆盖保存后原图被替换，另存后图库多一张新图
+- 从详情页返回到图库，列表正确刷新
+
+
 
 ---
 

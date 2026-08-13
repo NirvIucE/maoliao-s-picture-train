@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from src.database import get_db
 from src.models.user import User
-from src.schemas.image import ImageResponse, ImageListResponse, ImageUploadResponse
+from src.schemas.image import ImageResponse, ImageListResponse, ImageUploadResponse, EditImageRequest
 from src.services import image_service
 from src.routers.users import get_current_user
 
@@ -88,6 +88,33 @@ async def delete_image(
     """删除图片"""
     image_service.delete_image(db, image_id, current_user)
     return {"message": "图片删除成功"}
+
+
+@router.post("/{image_id}/edit", response_model=ImageUploadResponse)
+async def edit_image(
+    image_id: int,
+    req: EditImageRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """编辑图片（裁剪/旋转/翻转），支持覆盖或另存"""
+    image = image_service.edit_image(
+        db, image_id, req.operations, req.save_mode, req.custom_name, current_user
+    )
+    return _build_upload_response(image)
+
+
+@router.post("/{image_id}/replace", response_model=ImageUploadResponse)
+async def replace_image(
+    image_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """用新图片文件覆盖原图（AI 抠图/区域编辑结果）"""
+    image = image_service.replace_image(db, image_id, file, current_user)
+    return _build_upload_response(image)
+
 
 def _build_upload_response(image) -> dict:
     """构建上传响应(含URL)"""

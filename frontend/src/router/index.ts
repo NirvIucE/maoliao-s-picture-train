@@ -1,3 +1,11 @@
+/*
+ * @Author: NirvIucE 1750682685@qq.com
+ * @Date: 2026-07-27 21:08:43
+ * @LastEditors: NirvIucE 1750682685@qq.com
+ * @LastEditTime: 2026-08-13 16:40:14
+ * @FilePath: \new-picture-train\frontend\src\router\index.ts
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+ */
 
 // 路由表 + 导航守卫
 import {
@@ -33,6 +41,12 @@ const router = createRouter({
             path: "/agent",
             name: "AgentChat",
             component: () => import("@/views/AgentChat.vue"),
+            meta: { requiresAuth: true },
+        },
+        {
+            path: "/detail/:id",
+            name: "Detail",
+            component: () => import("@/views/Detail.vue"),
             meta: { requiresAuth: true },
         },
         {

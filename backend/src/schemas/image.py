@@ -1,4 +1,3 @@
-
 """
 图片 三套 Pydantic Schema
 Pydantic Schema 负责校验和序列化, 时刻分清楚每个场景该用哪个 Schema
@@ -6,7 +5,7 @@ ImageResponse、ImageUploadResponse 等
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 from pydantic import BaseModel
 
 class ImageResponse(BaseModel):
@@ -43,3 +42,18 @@ class ImageUploadResponse(BaseModel):
     image_url: str
     thumbnail_url: str
 
+class EditOperation(BaseModel):
+    """单次编辑操作(rotate/flip/crop 三选一)"""
+    type: Literal["rotate", "flip", "crop"]
+    angle: int | None = None # rotate: 90 / 180 / 270
+    direction: str | None = None # flip: "horizontal" / "vertical"
+    left: int | None = None # crop
+    top: int | None = None
+    right: int | None = None
+    bottom: int | None = None
+
+class EditImageRequest(BaseModel):
+    """编辑图片请求"""
+    operations: list[EditOperation]
+    save_mode: Literal["overwrite", "new"]
+    custom_name: str | None = None
