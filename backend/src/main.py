@@ -1,9 +1,10 @@
 """
 主应用入口
 """
+
 import os
 import mimetypes
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -29,6 +30,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def add_no_cache_for_images(request: Request, call_next):
+    response = await call_next(request)
+    # 图片覆盖后会变但 URL 不变，禁用缓存避免主页显示旧图
+    if request.url.path.startswith("/static/uploads"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 # 静态文件服务(提供图片访问)
 uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(uploads_dir, exist_ok=True)
@@ -39,6 +48,11 @@ frontend_dist = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", 
 frontend_assets = os.path.join(frontend_dist, "assets")
 if os.path.isdir(frontend_assets):
     app.mount("/assets", StaticFiles(directory=frontend_assets), name="frontend_assets")
+    background_removal_dir = os.path.join(frontend_dist, "background-removal")
+    if os.path.isdir(background_removal_dir):
+        app.mount("/background-removal", 
+        StaticFiles(directory=background_removal_dir), 
+        name="background_removal")
 
 #注册路由
 app.include_router(auth.router)

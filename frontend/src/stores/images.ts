@@ -1,3 +1,11 @@
+/*
+ * @Author: NirvIucE 1750682685@qq.com
+ * @Date: 2026-07-28 20:17:55
+ * @LastEditors: NirvIucE 1750682685@qq.com
+ * @LastEditTime: 2026-08-15 19:45:09
+ * @FilePath: \new-picture-train\frontend\src\stores\images.ts
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+ */
 
 import { defineStore } from "pinia"
 import { ref } from "vue"

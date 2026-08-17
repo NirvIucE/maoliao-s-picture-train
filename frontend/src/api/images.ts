@@ -116,7 +116,9 @@ export function editImage(
 // 替换图片（覆盖原图，用于 AI 抠图结果）
 export function replaceImage(imageId: number, file: Blob): Promise<ImageUploadRequest> {
     const formData = new FormData()
-    formData.append("file", file)
+    // Blob 直接 append 会丢失文件名（后端拿到 "blob"），无法识别扩展名
+    const namedFile = new File([file], "result.png", { type: file.type || "image/png" })
+    formData.append("file", namedFile)
     return api.post(`/images/${imageId}/replace`, formData, {
         headers: { "Content-Type": "multipart/form-data" }
     })

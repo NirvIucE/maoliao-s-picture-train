@@ -2,14 +2,15 @@
  * @Author: NirvIucE 1750682685@qq.com
  * @Date: 2026-08-13 16:47:01
  * @LastEditors: NirvIucE 1750682685@qq.com
- * @LastEditTime: 2026-08-13 18:29:48
+ * @LastEditTime: 2026-08-14 18:42:44
  * @FilePath: \new-picture-train\frontend\src\views\Detail.vue
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 -->
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { getImageDetail, editImage, type ImageItem, type EditOperation } from "@/api/images"
+import { getImageDetail, editImage, replaceImage, uploadImage, type ImageItem, type EditOperation } from "@/api/images"
+import { removeBackground, type Config } from "@imgly/background-removal"
 
 const route = useRoute()
 const router = useRouter()
@@ -32,6 +33,14 @@ const cropRect = ref({ left: 0, top: 0, right: 1, bottom: 1 })  // 百分比，�
 // 保存状态
 const saving = ref(false)
 const showSaveDialog = ref(false)   // 保存弹窗（选覆盖/另存）
+
+const aiProcessing = ref(false)  // AI 抠图处理中
+const aiProcessed = ref(false)   // 当前图片是否经过 AI 抠图
+
+// AI 抠图配置：模型文件本地化，避免首次从境外 CDN 下载卡住
+const removeBgConfig: Config = {
+  publicPath: window.location.origin + "/background-removal/",
+}
 
 // 裁剪拖拽状态
 const dragging = ref<null | {
@@ -99,6 +108,31 @@ function render() {
   ctx.drawImage(current, 0, 0)
 }
 
+// canvas 转 blob（PNG 格式，保留透明通道）
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob)
+      else reject(new Error("导出图片失败"))
+    }, "image/png")
+  })
+}
+
+// 加载图片到离屏 canvas
+function loadImageToCanvas(url: string) {
+  const img = new Image()
+  img.crossOrigin = "anonymous"
+  img.onload = () => {
+    const c = document.createElement("canvas")
+    c.width = img.naturalWidth
+    c.height = img.naturalHeight
+    c.getContext("2d")!.drawImage(img, 0, 0)
+    sourceCanvas.value = c
+    render()
+  }
+  img.src = url
+}
+
 // 操作变化时重新渲染
 watch(currentImage, () => {
   nextTick(render)
@@ -108,18 +142,7 @@ onMounted(async () => {
   try {
     const id = Number(route.params.id)
     image.value = await getImageDetail(id)
-    // 加载原图到离屏 canvas
-    const img = new Image()
-    img.crossOrigin = "anonymous"
-    img.onload = () => {
-      const c = document.createElement("canvas")
-      c.width = img.naturalWidth
-      c.height = img.naturalHeight
-      c.getContext("2d")!.drawImage(img, 0, 0)
-      sourceCanvas.value = c
-      render()
-    }
-    img.src = imageUrl.value
+    loadImageToCanvas(imageUrl.value)
   } catch (err: any) {
     alert(err.response?.data?.detail || "加载失败")
     router.push("/gallery")
@@ -147,6 +170,43 @@ function flipV() {
   addOperation({ type: "flip", direction: "vertical" })
 }
 
+// AI 抠图
+async function handleRemoveBg() {
+  if (!sourceCanvas.value || aiProcessing.value){
+    return
+  } 
+  aiProcessing.value = true
+  try {
+    const current = currentImage.value
+    if (!current) return
+    const blob = await canvasToBlob(current)
+    const resultBlob = await removeBackground(blob, removeBgConfig)
+
+    // 加载抠图结果
+    const url = URL.createObjectURL(resultBlob)
+    const img = new Image()
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve()
+      img.onerror = () => reject(new Error("加载抠图结果失败"))
+      img.src = url
+    })
+    const c = document.createElement("canvas")
+    c.width = img.naturalWidth
+    c.height = img.naturalHeight
+    c.getContext("2d")!.drawImage(img, 0, 0)
+    sourceCanvas.value = c
+    operations.value = []
+    aiProcessed.value = true
+    URL.revokeObjectURL(url)
+    render()
+    alert("AI 抠图完成")
+  } catch (err: any){
+    alert("AI 抠图失败：" + (err?.message || err))
+  } finally {
+    aiProcessing.value = false
+  }
+}
+
 // 撤销最后一步
 function undo() {
   operations.value.pop()
@@ -155,8 +215,13 @@ function undo() {
 // 重置全部操作
 function reset() {
   operations.value = []
+  aiProcessed.value = false
   cropMode.value = false
   cropRect.value = { left: 0, top: 0, right: 1, bottom: 1 }
+  // 重新加载原图（撤销抠图）
+  if (image.value) {
+    loadImageToCanvas(imageUrl.value)
+  }
 }
 
 // 裁剪框
@@ -253,7 +318,7 @@ onBeforeUnmount(() => {
 
 // 保存
 function openSaveDialog() {
-  if (operations.value.length === 0) {
+  if (operations.value.length === 0 && !aiProcessed.value) {
     alert("没有需要保存的修改")
     return
   }
@@ -264,7 +329,22 @@ async function handleSave(mode: "overwrite" | "new") {
   if (!image.value) return
   saving.value = true
   try {
-    await editImage(image.value.id, operations.value, mode)
+    if (aiProcessed.value) {
+      // AI 抠图结果：导出当前 canvas 为 PNG blob
+      const current = currentImage.value
+      if (!current) return
+      const blob = await canvasToBlob(current)
+      if (mode === "overwrite") {
+        await replaceImage(image.value.id, blob)
+      } else {
+        const file = new File([blob], `${image.value.display_name}.png`, { type: "image/png" })
+        await uploadImage(file, `${image.value.display_name}(抠图)`)
+      }
+    }else {
+      // 纯基础编辑：走 edit 接口
+      await editImage(image.value.id, operations.value, mode)
+    }
+    
     if (mode === "new") {
       alert("已另存为新图片")
       showSaveDialog.value = false
@@ -275,19 +355,10 @@ async function handleSave(mode: "overwrite" | "new") {
       // 重新加载原图
       const id = image.value.id
       operations.value = []
+      aiProcessed.value = false
       const fresh = await getImageDetail(id)
       image.value = fresh
-      const img = new Image()
-      img.crossOrigin = "anonymous"
-      img.onload = () => {
-        const c = document.createElement("canvas")
-        c.width = img.naturalWidth
-        c.height = img.naturalHeight
-        c.getContext("2d")!.drawImage(img, 0, 0)
-        sourceCanvas.value = c
-        render()
-      }
-      img.src = `${fresh.image_url}?t=${Date.now()}`
+      loadImageToCanvas(`${fresh.image_url}?t=${Date.now()}`)
     }
   } catch (err: any) {
     alert(err.response?.data?.detail || "保存失败")
@@ -350,7 +421,12 @@ async function handleSave(mode: "overwrite" | "new") {
                 <p v-if="operations.length > 0" class="ops-hint">
                     已记录 {{ operations.length }} 个操作
                 </p>
-
+                <h3>AI 编辑</h3>
+                <div class="tool-group">
+                    <button class="tool-btn" @click="handleRemoveBg" :disabled="aiProcessing">
+                        {{ aiProcessing ? "抠图中..." : "AI 抠图" }}
+                    </button>
+                </div>
                 <h3>图片信息</h3>
                 <ul class="info-list">
                     <li>名称：{{ image.display_name }}</li>
