@@ -2,14 +2,14 @@
  * @Author: NirvIucE 1750682685@qq.com
  * @Date: 2026-08-13 16:47:01
  * @LastEditors: NirvIucE 1750682685@qq.com
- * @LastEditTime: 2026-08-14 18:42:44
+ * @LastEditTime: 2026-08-18 18:24:32
  * @FilePath: \new-picture-train\frontend\src\views\Detail.vue
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 -->
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { getImageDetail, editImage, replaceImage, uploadImage, type ImageItem, type EditOperation } from "@/api/images"
+import { getImageDetail, editImage, replaceImage, uploadImage, aiEditImage, type ImageItem, type EditOperation } from "@/api/images"
 import { removeBackground, type Config } from "@imgly/background-removal"
 
 const route = useRoute()
@@ -36,6 +36,28 @@ const showSaveDialog = ref(false)   // 保存弹窗（选覆盖/另存）
 
 const aiProcessing = ref(false)  // AI 抠图处理中
 const aiProcessed = ref(false)   // 当前图片是否经过 AI 抠图
+
+const aiResultType = ref<"remove-bg" | "ai-edit">("remove-bg")  // 区分抠图/区域编辑
+
+// AI 区域编辑（涂鸦）状态
+const aiEditMode = ref(false)        // 是否处于涂鸦模式
+const aiEditPrompt = ref("")         // 编辑指令
+const aiEditing = ref(false)         // 编辑请求处理中
+const doodleCanvas = ref<HTMLCanvasElement | null>(null)  // 涂鸦层
+const brushSize = ref<"small" | "medium" | "large">("medium")
+const brushColor = ref("#ff0000")
+const brushOpacity = 0.3   // 降低不透明度，让涂鸦下方的原图更清楚
+const brushColors = [
+  { color: "#ff0000", name: "红色" },
+  { color: "#00aaff", name: "蓝色" },
+  { color: "#00cc66", name: "绿色" },
+  { color: "#ffcc00", name: "黄色" },
+  { color: "#000000", name: "黑色" },
+  { color: "#ffffff", name: "白色" },
+]
+const brushWidthMap: Record<string, number> = { small: 80, medium: 40, large: 15 }
+const isDrawing = ref(false)
+let lastPoint = { x: 0, y: 0 }
 
 // AI 抠图配置：模型文件本地化，避免首次从境外 CDN 下载卡住
 const removeBgConfig: Config = {
@@ -138,6 +160,21 @@ watch(currentImage, () => {
   nextTick(render)
 })
 
+// 进入涂鸦模式时，初始化涂鸦层尺寸并清空
+watch(aiEditMode, (val) => {
+  if(val){
+    nextTick(() => {
+      const dc = doodleCanvas.value
+      const cur = currentImage.value
+      if (dc && cur) {
+        dc.width = cur.width
+        dc.height = cur.height
+        dc.getContext("2d")!.clearRect(0, 0, dc.width, dc.height)
+      }
+    })
+  }
+})
+
 onMounted(async () => {
   try {
     const id = Number(route.params.id)
@@ -176,6 +213,7 @@ async function handleRemoveBg() {
     return
   } 
   aiProcessing.value = true
+  aiResultType.value = "remove-bg"
   try {
     const current = currentImage.value
     if (!current) return
@@ -204,6 +242,134 @@ async function handleRemoveBg() {
     alert("AI 抠图失败：" + (err?.message || err))
   } finally {
     aiProcessing.value = false
+  }
+}
+
+// ===== AI 区域编辑（涂鸦 + 指令）=====
+function enterAIEdit() {
+  if (!currentImage.value || aiProcessing.value || aiEditing.value) return
+  aiEditMode.value = true
+  aiEditPrompt.value = ""
+}
+
+function cancelAIEdit() {
+  aiEditMode.value = false
+  aiEditPrompt.value = ""
+  clearDoodle()
+}
+
+function clearDoodle() {
+  const dc = doodleCanvas.value
+  if (dc){
+    dc.getContext("2d")!.clearRect(0, 0, dc.width, dc.height)
+  }
+}
+
+// 鼠标坐标 → canvas 像素坐标（处理 CSS 缩放）
+function getDoodlePoint(e: MouseEvent) {
+  const dc = doodleCanvas.value!
+  const rect = dc.getBoundingClientRect()
+  return {
+    x: (e.clientX - rect.left) * (dc.width / rect.width),
+    y: (e.clientY - rect.top) * (dc.height / rect.height),
+  }
+}
+
+function startDoodle(e: MouseEvent){
+  isDrawing.value = true
+  lastPoint = getDoodlePoint(e)
+}
+
+function drawDoodle(e: MouseEvent){
+  if (!isDrawing.value) return
+  const dc = doodleCanvas.value
+  if (!dc) return
+  const ctx = dc.getContext("2d")!
+  const p = getDoodlePoint(e)
+  const maxDim = Math.max(dc.width, dc.height)
+  ctx.strokeStyle = brushColor.value
+  ctx.globalAlpha = brushOpacity
+  ctx.lineWidth = maxDim / brushWidthMap[brushSize.value]
+  
+  ctx.lineCap = "round"
+  ctx.lineJoin = "round"
+  ctx.beginPath()
+  ctx.moveTo(lastPoint.x, lastPoint.y)
+  ctx.lineTo(p.x, p.y)
+  ctx.stroke()
+  ctx.globalAlpha = 1
+  lastPoint = p
+}
+
+function stopDoodle(){
+  isDrawing.value = false
+}
+
+function blobToDataUrl(blob: Blob): Promise<string>{
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(new Error("读取图片失败"))
+    reader.readAsDataURL(blob)
+  }
+)}
+
+async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const resp = await fetch(dataUrl)
+  return await resp.blob()
+}
+
+async function handleAIEdit(){
+  if (!image.value || aiEditing.value) return
+  const prompt = aiEditPrompt.value.trim()
+  if (!prompt) { alert("请输入编辑指令"); return }
+  if (!currentImage.value) return
+
+  aiEditing.value = true
+  try {
+    // 1. 合成提示图：当前图 + 红色涂鸦标记
+    const cur = currentImage.value
+    const dc = doodleCanvas.value
+    const promptCanvas = document.createElement("canvas")
+    promptCanvas.width = cur.width
+    promptCanvas.height = cur.height
+    const ctx = promptCanvas.getContext("2d")!
+    ctx.drawImage(cur, 0, 0)
+    if (dc) ctx.drawImage(dc, 0, 0)
+
+    const blob = await canvasToBlob(promptCanvas)
+    const imageBase64 = await blobToDataUrl(blob)
+    // 2. 调后端 AI 编辑
+    const colorName = brushColors.find(c => c.color === brushColor.value)?.name || "红色"
+    const result = await aiEditImage(image.value.id, prompt, imageBase64, colorName)
+    // 3. 结果 base64 → 图片 → 替换 sourceCanvas
+    const resultBlob = await dataUrlToBlob(result.image_base64)
+    const url = URL.createObjectURL(resultBlob)
+    const img = new Image()
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve()
+      img.onerror = () => reject(new Error("加载 AI 编辑结果失败"))
+      img.src = url
+    })
+    const c = document.createElement("canvas")
+    c.width = img.naturalWidth
+    c.height = img.naturalHeight
+    c.getContext("2d")!.drawImage(img, 0, 0)
+    sourceCanvas.value = c
+    operations.value = []
+    aiProcessed.value = true
+    aiResultType.value = "ai-edit"
+    URL.revokeObjectURL(url)
+    
+    aiEditMode.value = false
+    aiEditPrompt.value = ""
+    render()
+    alert("AI 编辑完成")
+
+  }catch(err: any){
+    alert("AI 编辑失败：" + (err?.response?.data?.detail || err?.message || err))
+  }finally{
+    aiEditing.value = false
   }
 }
 
@@ -337,8 +503,9 @@ async function handleSave(mode: "overwrite" | "new") {
       if (mode === "overwrite") {
         await replaceImage(image.value.id, blob)
       } else {
-        const file = new File([blob], `${image.value.display_name}.png`, { type: "image/png" })
-        await uploadImage(file, `${image.value.display_name}(抠图)`)
+        const suffix = aiResultType.value === "ai-edit" ? "(AI编辑)" : "(抠图)"
+        const file = new File([blob], `${image.value.display_name}${suffix}.png`, { type: "image/png" })
+        await uploadImage(file, `${image.value.display_name}${suffix}`)
       }
     }else {
       // 纯基础编辑：走 edit 接口
@@ -383,6 +550,13 @@ async function handleSave(mode: "overwrite" | "new") {
                 <div class="preview-box">
                     <div class="canvas-wrapper" ref="canvasWrapper">
                         <canvas ref="canvasRef" class="preview-canvas"></canvas>
+                        <!-- 涂鸦层（AI 编辑模式） -->
+                        <canvas v-if="aiEditMode" 
+                          ref="doodleCanvas" 
+                          class="doodle-canvas"
+                          @mousedown="startDoodle" @mousemove="drawDoodle"
+                          @mouseup="stopDoodle" @mouseleave="stopDoodle">
+                        </canvas>
                         <!-- 裁剪框 -->
                         <div v-if="cropMode" class="crop-overlay">
                             <div class="crop-box" :style="cropBoxStyle"
@@ -423,10 +597,54 @@ async function handleSave(mode: "overwrite" | "new") {
                 </p>
                 <h3>AI 编辑</h3>
                 <div class="tool-group">
-                    <button class="tool-btn" @click="handleRemoveBg" :disabled="aiProcessing">
-                        {{ aiProcessing ? "抠图中..." : "AI 抠图" }}
+                  <button class="tool-btn" @click="handleRemoveBg" :disabled="aiProcessing || aiEditing || aiEditMode">
+                    {{ aiProcessing ? "抠图中..." : "AI 抠图" }}
+                  </button>
+                  <template v-if="!aiEditMode">
+                    <button class="tool-btn" @click="enterAIEdit" :disabled="aiProcessing || aiEditing">
+                      AI 区域编辑
                     </button>
+                  </template>
+                  <template v-else>
+                    <button class="tool-btn" @click="clearDoodle">
+                      清除涂鸦
+                    </button>
+                    <button class="tool-btn" @click="cancelAIEdit">
+                      取消
+                    </button>
+                  </template>
                 </div>
+                <div v-if="aiEditMode" class="ai-edit-panel">
+                  <div class="brush-row">
+                    <span class="brush-label">粗细：</span>
+                    <button class="tool-btn" :class="{ active: brushSize === 'small' }" @click="brushSize = 'small'">
+                      细
+                    </button>
+                    <button class="tool-btn" :class="{ active: brushSize === 'medium' }" @click="brushSize = 'medium'">
+                      中
+                    </button>
+                    <button class="tool-btn" :class="{ active: brushSize === 'large' }" @click="brushSize = 'large'">
+                      粗
+                    </button>
+                  </div>
+
+                  <div class="brush-row">
+                    <span class="brush-label">颜色：</span>
+                    <button v-for="c in brushColors" 
+                      :key="c.color" class="color-dot"
+                      :style="{ background: c.color }" 
+                      :title="c.name"
+                      :class="{ active: brushColor === c.color }" 
+                      @click="brushColor = c.color">
+                    </button>
+                  </div>
+
+                  <input v-model="aiEditPrompt" class="ai-edit-input" placeholder="描述修改内容，如：换成星空" />
+                  <button class="tool-btn primary" @click="handleAIEdit" :disabled="aiEditing">
+                      {{ aiEditing ? "编辑中..." : "提交编辑" }}
+                  </button>
+                </div>
+                <p v-if="aiEditMode" class="ops-hint">用鼠标在图片上涂抹要修改的区域（红色标记），再输入指令</p>
                 <h3>图片信息</h3>
                 <ul class="info-list">
                     <li>名称：{{ image.display_name }}</li>
@@ -496,6 +714,27 @@ async function handleSave(mode: "overwrite" | "new") {
   display: block;
 }
 
+.doodle-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.ai-edit-panel { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+
+.ai-edit-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
 .crop-overlay { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.4); }
 .crop-box { position: absolute; border: 2px dashed #409eff; background: rgba(64, 158, 255, 0.1); cursor: move; }
 .crop-handle { position: absolute; width: 12px; height: 12px; background: white; border: 2px solid #409eff; border-radius: 2px; }
@@ -503,6 +742,12 @@ async function handleSave(mode: "overwrite" | "new") {
 .crop-handle.ne { right: -7px; top: -7px; cursor: ne-resize; }
 .crop-handle.sw { left: -7px; bottom: -7px; cursor: sw-resize; }
 .crop-handle.se { right: -7px; bottom: -7px; cursor: se-resize; }
+
+.brush-row { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.brush-label { color: #606266; }
+.color-dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #ccc; cursor: pointer; }
+.color-dot.active { border-color: #409eff; box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.3); }
+.tool-btn.active { border-color: #409eff; color: #409eff; background: #ecf5ff; }
 
 .toolbar { width: 240px; flex-shrink: 0; }
 .toolbar h3 { margin: 16px 0 8px; font-size: 15px; }

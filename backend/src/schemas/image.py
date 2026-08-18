@@ -57,3 +57,13 @@ class EditImageRequest(BaseModel):
     operations: list[EditOperation]
     save_mode: Literal["overwrite", "new"]
     custom_name: str | None = None
+
+class AIEditRequest(BaseModel):
+    """AI编辑图片请求"""
+    prompt: str # 用户编辑指令，如“换成星空”
+    image_base64: str # 提示图（原图+涂鸦标记）的 base64 data URL
+    color_name: str = "红色"   # 涂鸦标记色，用于拼接 prompt
+
+class AIEditResponse(BaseModel):
+    """AI 区域编辑响应"""
+    image_base64: str    # 结果图的 base64 data URL

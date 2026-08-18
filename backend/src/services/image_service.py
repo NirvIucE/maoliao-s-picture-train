@@ -5,6 +5,7 @@
 import os
 import io
 import uuid
+import base64
 
 from fastapi import UploadFile, HTTPException, status
 from sqlalchemy.orm import Session
@@ -24,6 +25,7 @@ from src.utils.image_utils import (
     validate_image_format,
     get_date_upload_dir,
 )
+from src.config import PROVIDER_CONFIG
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__),"..", "uploads")
 
@@ -299,3 +301,49 @@ def replace_image(db: Session, image_id: int, file: UploadFile, user: User) -> I
     db.refresh(image)
     asyncio.create_task(cache_delete_pattern(f"images:user:{user.id}:*"))
     return image
+
+IMAGE_EDIT_MODEL = "Qwen/Qwen-Image-Edit-2509"
+async def edit_image_by_ai(db: Session, image_id: int, prompt: str, image_base64: str, user: User, color_name: str = "红色") -> str:
+    """AI 区域编辑：调 SiliconFlow 图生图，返回结果图 base64 data URL"""
+    # 校验图片存在（复用现有权限+存在性校验）
+    get_image_detail(db, image_id, user)
+
+    provider = PROVIDER_CONFIG.get("siliconflow")
+    if not provider or not provider.get("api_key"):
+        raise HTTPException(status_code=500, detail="siliconflow 未配置")
+    
+    # 组合指令：让模型只改红色涂鸦标记区域
+    full_prompt = (
+        f"图中被{color_name}半透明标记覆盖的区域是唯一需要修改的目标区域。"
+        f"请仅对该区域执行：{prompt}。保持图片其他部分完全不变。"
+    )
+
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        resp = await client.post(
+            f"{provider['base_url']}/images/generations",
+            headers={
+                "Authorization": f"Bearer {provider['api_key']}",
+                "Content-Type": "application/json",
+            },
+            json = {
+                "model": IMAGE_EDIT_MODEL,
+                "prompt": full_prompt,
+                "image": image_base64,
+            },
+        )
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"AI 编辑失败: {resp.status_code} - {resp.text[:200]}",
+            )
+        
+        data = resp.json()
+        result_url = data["images"][0]["url"]
+
+        # 下载临时结果并转 base64（URL 会过期，必须立即转存）
+        dl = await client.get(result_url, follow_redirects=True)
+        if dl.status_code != 200:
+            raise HTTPException(status_code=502, detail="下载 AI 结果失败")
+
+        result_base64 = base64.b64encode(dl.content).decode("utf-8")
+        return f"data:image/png;base64,{result_base64}"

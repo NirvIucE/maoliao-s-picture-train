@@ -2,7 +2,7 @@
  * @Author: NirvIucE 1750682685@qq.com
  * @Date: 2026-07-23 19:45:42
  * @LastEditors: NirvIucE 1750682685@qq.com
- * @LastEditTime: 2026-08-12 18:11:00
+ * @LastEditTime: 2026-08-18 18:00:00
  * @FilePath: \new-picture-train\.trae\documents\learning-roadmap-plan.md
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 -->
@@ -547,7 +547,7 @@ new-picture-train/： (项目根目录){
 | 附件预览 + 自动切视觉模型 | 同上 | 缩略图预览条 + 模型选择器锁定 + 移除恢复 |
 | chatStream 加 imageId 参数 | `frontend/src/api/agent.ts` | 可选参数，发送时拼入 `body.image_id` |
 
-**待实现**：图库选图弹窗集成
+✅ **已完成**（图库选图弹窗集成）：
 
 | 改动 | 文件 | 说明 |
 |------|------|------|
@@ -556,7 +556,7 @@ new-picture-train/： (项目根目录){
 
 #### 8.2 图片编辑与保存接口（后端）
 
-**待实现**（代码已给出，待应用）：
+✅ **已完成**：
 
 | 改动 | 文件 | 说明 |
 |------|------|------|
@@ -615,7 +615,7 @@ Body: file = 编辑后的图片文件
 │     [下载]          [覆盖保存] [另存为新]    │
 └──────────────────────────────────────────┘
 
-**待实现**：
+✅ **已完成**：
 
 | 步骤 | 文件 | 内容 |
 |------|------|------|
@@ -623,26 +623,24 @@ Body: file = 编辑后的图片文件
 | 8.3.2 | `frontend/src/components/ImageCard.vue` | 加 `@dblclick` → `router.push("/detail/" + id)` |
 | 8.3.3 | `frontend/src/api/images.ts` | 新增 `editImage(id, operations, saveMode, customName?)` + `replaceImage(id, blob)` |
 | 8.3.4 | `frontend/src/views/Detail.vue`（新建） | 核心编辑页，见下方详细设计 |
-| 8.3.5 | `npm install fabric @imgly/background-removal` | 安装依赖 |
+| 8.3.5 | `npm install @imgly/background-removal` | 安装依赖（**未用 Fabric.js**，改用原生 Canvas，见下方说明） |
 
-**Detail.vue 核心逻辑设计**：
-- onMounted → getImageDetail(id) → 加载原图到 Fabric.js canvas
-- 用户操作（旋转/翻转/画笔涂鸦）→ 仅 Canvas 前端实时预览，不请求后端
-- 用户选择"AI抠图" → @imgly/background-removal 浏览器端处理 → 替换 canvas 内容
-- 用户选择"AI区域编辑"：
-a. 从 canvas 提取遮罩（画笔/矩形选中区域 → 白色遮罩图）
-b. 从 canvas 提取原图 base64
-c. 发送遮罩+原图+提示词 → POST /api/agent/chat → SSE 流式编辑
+**Detail.vue 核心逻辑设计（实际落地）**：
+- **未用 Fabric.js**，改用原生 Canvas + 「操作序列」模型：`operations` 数组记录用户操作（rotate/flip/crop），`applyOperation` 按序重绘。预览 = 从原图 `sourceCanvas` 重放整个操作序列，因此支持任意顺序组合（如先翻转 → 再裁剪 → 再旋转），且与后端 Pillow 执行顺序一致。
+- 基础编辑（旋转/翻转/裁剪）→ 前端 Canvas 实时预览 + 后端 Pillow 执行（传 `operations` 参数，非整图）
+- AI 抠图 → `@imgly/background-removal` 浏览器端处理 → 替换 `sourceCanvas`（`aiProcessed=true`）
+- AI 区域编辑 → 独立涂鸦层生成「提示图」（原图 + 红色标记）→ `POST /api/images/{id}/ai-edit` → 后端调 SiliconFlow → 返回结果图 base64 → 替换 `sourceCanvas`
 - 用户点击保存（两个按钮，按编辑类型路由）：
 a. [覆盖保存]
    - 基础编辑 → POST /api/images/{id}/edit save_mode=overwrite
    - AI 抠图/AI区域编辑 → POST /api/images/{id}/replace（传结果图 blob）
 b. [另存新图]
    - 基础编辑 → POST /api/images/{id}/edit save_mode=new
-   - AI 抠图 → POST /api/images/upload（传结果图 blob）
-   - AI 区域编辑 → 后端已存新记录，前端跳转查看
+   - AI 抠图/AI区域编辑 → POST /api/images/upload（传结果图 blob）
 
 #### 8.4 AI 抠图与区域编辑（参考项目思路 + 混合架构落地）
+
+✅ **已完成**：8.4.1 AI 抠图（前端 @imgly + 模型本地化）、8.4.2 AI 区域编辑（前端涂鸦 + 后端 SiliconFlow）。实际实现与下方"参考项目思路"的差异见文末「实际实现与踩坑记录」小节。
 
 **参考项目关键发现**：
 
@@ -667,7 +665,9 @@ user: [
 
 > **注意**：这需要视觉模型同时理解两张图片（原图+遮罩）和一条指令。不是所有视觉模型都能很好地执行遮罩编辑，需实测验证可用模型。
 
-**验收标准**：
+> ⚠️ **实际未采用此「遮罩图」方案**：调研发现 SiliconFlow 的 `images/generations` API 不支持显式 mask 参数，因此改为「涂鸦标记图 + 指令式编辑」，详见文末「实际实现与踩坑记录」。
+
+**验收标准（✅ 已全部通过）**：
 - 双击图库图片进入详情页，能看到原图
 - 能在画布上涂鸦/画矩形标记区域
 - 点击"AI 区域编辑"后 AI 能修改选中区域（如"把背景变成蓝天"）
@@ -675,6 +675,41 @@ user: [
 - 基础旋转/翻转/裁剪操作正常
 - 覆盖保存后原图被替换，另存后图库多一张新图
 - 从详情页返回到图库，列表正确刷新
+
+#### 实际实现与踩坑记录
+
+**8.4.1 AI 抠图**：
+
+| 踩坑 | 根因 | 解决 |
+|------|------|------|
+| 模型下载卡死半小时 | 模型文件不在 npm 包内（`resources.json` 为空），默认从境外 CDN `staticimgly.com` 下载，国内网络卡死 | 下载官方模型包 `package.tgz`（271MB）本地化到 `frontend/public/background-removal/`，配置 `publicPath` 指向本地 |
+| `Invalid base URL` | `publicPath` 传相对路径 `/background-removal/`，库内部 `new URL(rel, base)` 要求 base 为绝对 URL | 改为 `window.location.origin + "/background-removal/"` |
+| 生产模式返回 HTML | `/background-removal` 未挂载静态目录，请求落到 SPA fallback 返回 index.html | `main.py` 挂载 `StaticFiles`（必须放在 SPA fallback 之前） |
+| 覆盖保存 400「不支持的图片格式」 | `replaceImage` 传裸 `Blob`，`FormData.append` 后文件名是 `"blob"` 无扩展名，后端 `splitext` 得到空串 | 包成 `new File([blob], "result.png", { type: "image/png" })` |
+| 主页仍显示旧图 | 覆盖后图片 URL 不变但内容变了，浏览器缓存旧缩略图/原图 | 后端给 `/static/uploads` 加 `Cache-Control: no-cache`（配合 ETag 走 304） |
+
+**8.4.2 AI 区域编辑**：
+
+| 踩坑 | 根因 | 解决 |
+|------|------|------|
+| 原「遮罩图」方案走不通 | 调研发现 SiliconFlow `images/generations` 无 mask 参数 | 改用「涂鸦标记图」：前端把红色涂鸦叠到原图上作为 `image`，`prompt` 说明"仅改红色标记区域"；模型用 `Qwen/Qwen-Image-Edit-2509`（指令式编辑） |
+| 前端 10s 超时 | AI 推理约 60s，远超 axios 全局 `timeout: 10000` | `aiEditImage` 单独设 `timeout: 300000` |
+| 改了前端代码不生效 | 生产模式跑 `dist`，改完没 `npm run build` / 浏览器缓存旧 bundle | 每次改前端后 `npm run build` + `Ctrl+F5` 强制刷新 |
+
+**8.4.2 画笔体验优化（后续迭代）**：
+
+| 优化 | 说明 |
+|------|------|
+| 画笔粗细可调 | `brushSize` 三档（细/中/粗），对应线宽 `max(宽,高)/80 /40 /15` |
+| 画笔颜色可调 | `brushColors` 六色（红/蓝/绿/黄/黑/白），涂鸦标记色经 `color_name` 传入后端动态拼接 prompt |
+| 降低不透明度 | `brushOpacity = 0.3`，让涂鸦下方的原图透出，避免误涂不想改的区域 |
+
+**通用工程化踩坑**：
+
+| 踩坑 | 根因 | 解决 |
+|------|------|------|
+| 后端 ImportError 起不来 | IDE 自动补全误加 `from ntpath import isdir`、`from fastapi import background` | 手动删除多余 import，警惕 IDE 自动补全导入无关模块 |
+| API 函数放错文件 | `replaceImage` 误加到 `stores/images.ts`（Pinia）而非 `api/images.ts`，报 `找不到名称 api` | API 调用统一放 `src/api/`，store 只做状态管理 |
 
 
 

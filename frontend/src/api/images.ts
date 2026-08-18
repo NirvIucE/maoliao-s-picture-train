@@ -123,3 +123,13 @@ export function replaceImage(imageId: number, file: Blob): Promise<ImageUploadRe
         headers: { "Content-Type": "multipart/form-data" }
     })
 }
+
+// AI 区域编辑（涂鸦 + 指令），返回结果图 base64, colorName 用于后端拼接 prompt
+export function aiEditImage(
+    imageId: number,
+    prompt: string,
+    imageBase64: string,
+    colorName = "红色"
+): Promise<{image_base64: string}> {
+    return api.post(`/images/${imageId}/ai-edit`, { prompt, image_base64: imageBase64, color_name: colorName }, {timeout: 300000})
+}
