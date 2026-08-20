@@ -25,6 +25,7 @@ class PublicImageResponse(BaseModel):
     display_name: str
     thumbnail_url: Optional[str] = None
     image_url: Optional[str] = None
+    is_visible: bool = True
 
 
 class PublicImageListResponse(BaseModel):
@@ -42,3 +43,14 @@ class ReviewRequest(BaseModel):
 class RemoveRequest(BaseModel):
     """下架请求"""
     comment: Optional[str] = None
+
+
+class PublicImageDetailResponse(PublicImageResponse):
+    """公共图库详情响应（额外含当前用户的权限判断）"""
+    is_owner: bool
+    is_admin: bool
+
+
+class SetVisibilityRequest(BaseModel):
+    """切换可见性请求"""
+    visible: bool

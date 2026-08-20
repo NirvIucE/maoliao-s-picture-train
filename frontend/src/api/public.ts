@@ -21,6 +21,7 @@ export interface PublicImageItem {
     display_name: string
     thumbnail_url: string | null
     image_url: string | null
+    is_visible: boolean
 }
 
 export interface PublicImageListResponse {
@@ -58,7 +59,22 @@ export function removePublicImage(publicId: number, comment?: string): Promise<{
     return api.post(`/public/images/${publicId}/remove`, { comment: comment || null })
 }
 
-// 作者删除自己的公共库记录（撤回 pending / 主动删除 approved）
+// 删除公共库记录（上传者本人或管理员）
 export function deletePublicImage(publicId: number): Promise<{ message: string }> {
     return api.delete(`/public/images/${publicId}`)
+}
+
+// 公共图库详情（含当前用户权限判断）
+export interface PublicImageDetail extends PublicImageItem {
+    is_owner: boolean
+    is_admin: boolean
+}
+
+export function getPublicDetail(publicId: number): Promise<PublicImageDetail> {
+    return api.get(`/public/images/${publicId}`)
+}
+
+// 切换可见性
+export function setPublicVisibility(publicId: number, visible: boolean): Promise<{ message: string }> {
+    return api.post(`/public/images/${publicId}/visibility`, { visible })
 }

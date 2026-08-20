@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue"
+import { useRouter } from "vue-router"
 import { getPublicImages, type PublicImageItem } from "@/api/public"
 
+const router = useRouter()
 const items = ref<PublicImageItem[]>([])
 const loading = ref(false)
 const total = ref(0)
@@ -19,6 +21,10 @@ async function load() {
   }
 }
 
+function goDetail(id: number) {
+  router.push(`/public/${id}`)
+}
+
 onMounted(load)
 </script>
 
@@ -29,14 +35,12 @@ onMounted(load)
     <p v-if="loading">加载中...</p>
     <p v-else-if="items.length === 0">公共图库暂无图片</p>
     <div v-else class="grid">
-      <div v-for="item in items" :key="item.id" class="card">
-        <a :href="item.image_url || '#'" target="_blank" rel="noopener">
-          <img
-            :src="item.thumbnail_url || item.image_url || ''"
-            :alt="item.display_name"
-            loading="lazy"
-          />
-        </a>
+      <div v-for="item in items" :key="item.id" class="card" @dblclick="goDetail(item.id)">
+        <img
+          :src="item.thumbnail_url || item.image_url || ''"
+          :alt="item.display_name"
+          loading="lazy"
+        />
         <div class="info">
           <p class="name" :title="item.display_name">{{ item.display_name }}</p>
           <p class="author">by {{ item.username || "未知" }}</p>

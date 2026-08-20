@@ -10,8 +10,10 @@ from src.schemas.public_image import (
     PublicImageSubmitRequest,
     PublicImageResponse,
     PublicImageListResponse,
+    PublicImageDetailResponse,
     ReviewRequest,
     RemoveRequest,
+    SetVisibilityRequest,
 )
 from src.services import public_service
 from src.routers.users import get_current_user
@@ -43,8 +45,8 @@ async def list_public(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """浏览公共图库（仅审核通过的图片）"""
-    return public_service.get_public_images(db, skip, limit)
+    """浏览公共图库（角色感知过滤）"""
+    return public_service.get_public_images(db, current_user, skip, limit)
 
 
 @router.get("/my", response_model=PublicImageListResponse)
@@ -93,12 +95,34 @@ async def remove(
     return {"message": "已下架"}
 
 
+@router.get("/{public_id}", response_model=PublicImageDetailResponse)
+async def detail(
+    public_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """公共图库图片详情（含当前用户权限判断）"""
+    return public_service.get_public_detail(db, public_id, current_user)
+
+
+@router.post("/{public_id}/visibility")
+async def visibility(
+    public_id: int,
+    req: SetVisibilityRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """切换可见性（管理员或上传者）"""
+    public_service.set_visibility(db, public_id, req.visible, current_user)
+    return {"message": "已更新可见性"}
+
+
 @router.delete("/{public_id}")
 async def delete(
     public_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """作者删除自己的公共库记录（撤回 pending / 主动删除 approved）"""
+    """删除公共库记录（上传者本人或管理员）"""
     public_service.delete_public_image(db, public_id, current_user)
     return {"message": "删除成功"}

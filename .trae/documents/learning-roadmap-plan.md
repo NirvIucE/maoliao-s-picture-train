@@ -721,7 +721,7 @@ approved ──(管理员下架)──▶ rejected（附下架意见）
 - `is_visible`（可见性）与 `status`（审核状态）两个维度的语义分离
 - 列表查询的「角色感知」过滤：同一接口按当前用户角色返回不同结果集
 
-> **本阶段为规划设计稿，代码待确认后实施。**
+> **本阶段已完成并验证通过。**
 
 **需求背景**：
 公共图库图片目前只能看缩略图，无法进入详情查看大图与完整信息。现要求：
@@ -754,7 +754,7 @@ is_visible = Column(Boolean, nullable=False, default=True, server_default="1", c
 
 | 方法 & 路径 | 权限 | 说明 |
 |------------|------|------|
-| `GET /api/public/images`（变更） | 登录用户 | 角色感知过滤：普通用户返回 `approved + is_visible`；管理员返回全部 `approved`（含隐藏） |
+| `GET /api/public/images`（变更） | 登录用户 | 角色感知过滤：普通用户返回 `approved + (is_visible 或 自己上传)`；管理员返回全部 `approved`（含隐藏） |
 | `GET /api/public/images/{id}`（新增） | 登录用户 | 公共图片详情：返回图片信息 + 上传者 + `is_visible` + `is_owner`/`is_admin` 判断 |
 | `POST /api/public/images/{id}/visibility`（新增） | 管理员/上传者 | 切换可见性，body `{ visible: bool }` |
 | `DELETE /api/public/images/{id}`（变更） | 管理员/上传者 | 删除公共记录（原仅上传者本人，现扩展为管理员或上传者均可） |
@@ -769,7 +769,7 @@ is_visible = Column(Boolean, nullable=False, default=True, server_default="1", c
 | `/public/:id` → `PublicDetail.vue`（新建） | 公共图片详情页，`:id` 为公共记录 id |
 | 按钮显隐逻辑 | 按权限矩阵：管理员/上传者显示「删除」+「切换可见性」，其他普通用户隐藏 |
 
-**实战任务（待实施）**：
+**实战任务（已完成）**：
 
 | 步骤 | 文件 | 内容 |
 |------|------|------|
@@ -784,12 +784,15 @@ is_visible = Column(Boolean, nullable=False, default=True, server_default="1", c
 | 10.9 | `frontend/src/views/PublicGallery.vue` | 卡片 `@dblclick` → 跳 `/public/:id` |
 
 **验收标准**：
-- 公共图库双击图片进入独立详情页，能看到大图与上传者信息
-- 管理员在详情页可见「删除」+「切换可见性」两个按钮
-- 上传者本人可见「删除」+「切换可见性」两个按钮
-- 其他普通用户进入详情页看不到任何操作按钮
-- 设为不可见后，其他普通用户列表看不到该图，上传者/管理员仍可见
-- 删除只删公共记录，原图保留在个人图库
+- ✅ 公共图库双击图片进入独立详情页，能看到大图与上传者信息
+- ✅ 管理员在详情页可见「删除」+「切换可见性」两个按钮
+- ✅ 上传者本人可见「删除」+「切换可见性」两个按钮
+- ✅ 其他普通用户进入详情页看不到任何操作按钮
+- ✅ 设为不可见后，其他普通用户列表看不到该图，上传者/管理员仍可见
+- ✅ 删除只删公共记录，原图保留在个人图库
+
+**踩坑记录**：
+- 浏览过滤初版只区分「管理员/非管理员」，导致上传者把自己图设为不可见后自己也看不到；已修复为「非管理员看 `is_visible == True` 或 `user_id == 自己`」，符合验收标准「上传者始终可见」。
 
 ---
 

@@ -4,6 +4,7 @@
 from datetime import datetime
 
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from src.models.image import Image
@@ -27,6 +28,7 @@ def _build_item(pi: PublicImage, image: Image, submitter: User) -> dict:
         "display_name": image.display_name,
         "thumbnail_url": image.thumbnail_url,
         "image_url": image.image_url,
+        "is_visible": pi.is_visible,
     }
 
 
@@ -49,14 +51,21 @@ def submit_to_public(db: Session, image_id: int, user: User) -> dict:
     return _build_item(pi, image, user)
 
 
-def get_public_images(db: Session, skip: int = 0, limit: int = 20) -> dict:
-    """浏览公共图库（仅审核通过的图片）"""
+def get_public_images(db: Session, user: User, skip: int = 0, limit: int = 20) -> dict:
+    """浏览公共图库（管理员看全部 approved；普通用户看可见 + 自己上传的全部）"""
     query = (
         db.query(PublicImage, Image, User)
         .join(Image, PublicImage.image_id == Image.id)
         .join(User, PublicImage.user_id == User.id)
         .filter(PublicImage.status == "approved")
     )
+    if user.role != "admin":
+        query = query.filter(
+            or_(
+                PublicImage.is_visible == True,  # noqa: E712
+                PublicImage.user_id == user.id,
+            )
+        )
     total = query.count()
     rows = query.order_by(PublicImage.created_at.desc()).offset(skip).limit(limit).all()
     items = [_build_item(pi, img, u) for pi, img, u in rows]
@@ -123,12 +132,29 @@ def remove_public_image(db: Session, public_id: int, comment: str | None, admin:
 
 
 def delete_public_image(db: Session, public_id: int, user: User) -> None:
-    """作者删除自己的公共库记录（撤回 pending / 主动删除 approved）"""
-    pi = db.query(PublicImage).filter(
-        PublicImage.id == public_id,
-        PublicImage.user_id == user.id,
-    ).first()
-    if not pi:
-        raise HTTPException(status_code=404, detail="记录不存在或无权操作")
+    """删除公共库记录（上传者本人或管理员）"""
+    pi = _get_public_record(db, public_id)
+    if pi.user_id != user.id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="无权操作")
     db.delete(pi)
+    db.commit()
+
+
+def get_public_detail(db: Session, public_id: int, user: User) -> dict:
+    """公共图库详情（含当前用户是否为上传者/管理员）"""
+    pi = _get_public_record(db, public_id)
+    image = db.query(Image).filter(Image.id == pi.image_id).first()
+    submitter = db.query(User).filter(User.id == pi.user_id).first()
+    item = _build_item(pi, image, submitter)
+    item["is_owner"] = pi.user_id == user.id
+    item["is_admin"] = user.role == "admin"
+    return item
+
+
+def set_visibility(db: Session, public_id: int, visible: bool, user: User) -> None:
+    """切换可见性（管理员或上传者）"""
+    pi = _get_public_record(db, public_id)
+    if pi.user_id != user.id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="无权操作")
+    pi.is_visible = visible
     db.commit()
