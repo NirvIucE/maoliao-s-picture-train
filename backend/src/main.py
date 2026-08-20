@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from src.database import engine, Base
-from src.routers import auth, users, images, agent
+from src.routers import auth, users, images, agent, public_images
 
 
 # 注册 .webp 的 MIME 类型（Windows 上默认不识别）
@@ -59,6 +59,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(images.router)
 app.include_router(agent.router)
+app.include_router(public_images.router)
 
 @app.get("/health")
 def health_check():

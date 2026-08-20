@@ -1,11 +1,3 @@
-<!--
- * @Author: NirvIucE 1750682685@qq.com
- * @Date: 2026-07-23 19:45:42
- * @LastEditors: NirvIucE 1750682685@qq.com
- * @LastEditTime: 2026-08-18 18:00:00
- * @FilePath: \new-picture-train\.trae\documents\learning-roadmap-plan.md
- * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
--->
 # 猫里奥全栈云图库 — 学习路线与迭代计划
 
 > **学习模式：你主导编码，我负责指导、审查、讲解。代码在对话中输出，由你判断后自行写入项目。**
@@ -26,7 +18,10 @@
    - [阶段 5：Agent 接入 — AI 图片分析](#阶段-5agent-接入--ai-图片分析)
    - [阶段 6：Agent 接入 — AI 对话助手](#阶段-6agent-接入--ai-对话助手)
    - [阶段 7：缓存、优化与部署](#阶段-7缓存优化与部署)
-   - [阶段 8：图片详情与 AI 编辑](#阶段8图片详情与ai编辑)
+   - [阶段 8：图片详情与 AI 编辑](#阶段-8图片详情与-ai-编辑)
+   - [阶段 9：公共图库与角色权限（审核流）](#阶段-9公共图库与角色权限审核流)
+   - [阶段 10：公共图库详情页与可见性控制](#阶段-10公共图库详情页与可见性控制)
+   - [阶段 11：个人资料编辑](#阶段-11个人资料编辑)
 5. [每个阶段的标准流程](#5-每个阶段的标准流程)
 6. [关键约定](#6-关键约定)
 
@@ -318,6 +313,7 @@ new-picture-train/： (项目根目录){
 | 按日期目录存储 | `image_utils.py` 加 `get_date_upload_dir()`，`image.py` 加 `date_dir` 列 |
 | 图片搜索 | `image_service.py` 加 `search` 参数支持 `ilike` 模糊匹配，前端 `Gallery.vue` 加 500ms 防抖搜索框 |
 | `href`→`Axios blob` 下载 | `ImageCard.vue` 的 `<a>` 标签绕过 Axios 拦截器→401；改用 `downloadOriginalImage()` + `blob` 下载 |
+| 上传 MIME 类型规范化 | `image_service.py` 加 `EXTENSION_TO_MIME` 映射，`.jpg` 统一存为标准 `image/jpeg`，避免视觉模型误判图片格式 |
 
 ---
 
@@ -422,6 +418,8 @@ new-picture-train/： (项目根目录){
 | AgentDialog 模型选择 | 弹窗打开时过滤 `type: "vision"` 的模型供用户选择，不再硬编码模型 ID |
 | 图片 base64 编码 | `analyze_image()` 读取 `image_path` → base64 → `data:image/xxx;base64,...` 嵌入多模态请求 |
 
+> **后续调整**：图库卡片（`ImageCard.vue`）上的「AI 分析」按钮已移除——因与 AI 助手的图片分析功能（AgentChat 选图/上传分析）冗余。`AgentDialog.vue` 组件保留备用，不再由 `Gallery.vue` 引用。
+
 ---
 
 ### 阶段 6：Agent 接入 — AI 对话助手
@@ -489,9 +487,8 @@ new-picture-train/： (项目根目录){
 | 清除 pycache 缓存 | 后端 `__pycache__/` 需定期清理，否则旧 `.pyc` 可能导致修改不生效 |
 
 ---
----
 
-### 阶段8：图片详情与AI编辑
+### 阶段 8：图片详情与 AI 编辑
 
 **学习目标**：Fabric.js 画布操作、AI 区域编辑（遮罩+提示词）、浏览器端 AI 抠图、基础图片编辑。
 
@@ -502,24 +499,71 @@ new-picture-train/： (项目根目录){
 - 编辑操作的序列化（前端累积操作 → 一次性提交后端）
 - 保存策略：覆盖原图 vs 另存为新图的取舍
 
-**参考项目**：`git上找到的AI图像编辑纯前端示例项目/`（React + Fabric.js + @imgly/background-removal），架构分析见下方 8.4 节。
+**实战任务**（由你编码）：
+| 步骤 | 文件 | 内容 |
+|------|------|------|
+| 8.1 | `backend/src/schemas/agent.py` | `ChatRequest` 加 `image_id` 字段（`int \| None = None`） |
+| 8.2 | `backend/src/services/agent_service.py` | `chat()` 支持多模态：有 `image_id` 时查图片 → base64 → 追加多模态 message |
+| 8.3 | `backend/src/routers/agent.py` | `/chat` 端点前置校验：图片存在性 + 模型类型（text 模型拒绝带图请求） |
+| 8.4 | `frontend/src/views/AgentChat.vue` | 本地上传按钮 + 附件预览 + 自动切视觉模型 |
+| 8.5 | `frontend/src/api/agent.ts` | `chatStream` 加 `imageId` 参数，发送时拼入 `body.image_id` |
+| 8.6 | `frontend/src/views/GalleryPicker.vue` | 图库选图弹窗（新建）：遮罩 + 图片网格 + 搜索防抖，选中 emit |
+| 8.7 | `frontend/src/views/AgentChat.vue` | 输入区「选图」按钮 → 打开弹窗 → 走统一 attachedImage 流程 |
+| 8.8 | `backend/src/schemas/image.py` | `EditOperation` + `EditImageRequest`（`type: rotate/flip/crop` + 参数） |
+| 8.9 | `backend/src/services/image_service.py` | `edit_image()`：Pillow 按序执行 旋转→翻转→裁剪；覆盖=重写原文件+缩略图，另存=新文件+新记录 |
+| 8.10 | `backend/src/services/image_service.py` | `replace_image()`：接收新图片，覆盖原 `file_path` + 重生成缩略图 + 更新尺寸，保留原记录 |
+| 8.11 | `backend/src/routers/images.py` | `POST /{id}/edit`（操作列表 + `save_mode`）、`POST /{id}/replace`（multipart 图片） |
+| 8.12 | `frontend/src/router/index.ts` | 新增路由 `/detail/:id` → Detail 组件 |
+| 8.13 | `frontend/src/components/ImageCard.vue` | `@dblclick` → `router.push("/detail/" + id)` |
+| 8.14 | `frontend/src/api/images.ts` | `editImage(id, operations, saveMode, customName?)` + `replaceImage(id, blob)` |
+| 8.15 | `frontend/src/views/Detail.vue` | 详情编辑页（新建）：原生 Canvas + 操作序列 + AI 抠图/区域编辑 |
+| 8.16 | `frontend/` | `npm install @imgly/background-removal`（未用 Fabric.js，改用原生 Canvas） |
+| 8.17 | `backend/src/schemas/image.py` | `UpdateImageNameRequest`（`custom_name: str`） |
+| 8.18 | `backend/src/services/image_service.py` | `update_image_name()`：校验归属 → 更新 `custom_name` → 清图库缓存 |
+| 8.19 | `backend/src/routers/images.py` | `PATCH /{id}/name` 改名端点（`async def`） |
+| 8.20 | `frontend/src/api/images.ts` | `updateImageName()` 封装 |
+| 8.21 | `frontend/src/api/client.ts` | Axios 包装层新增 `patch` 方法 |
+| 8.22 | `frontend/src/views/Detail.vue` | 图片信息区「名称」加「改名」按钮 |
 
-#### 8.0 架构分工决策（重要）
+**验收标准**：
+- ✅ 双击图库图片进入详情页，能看到原图
+- ✅ 能在画布上涂鸦/画矩形标记区域
+- ✅ 点击"AI 区域编辑"后 AI 能修改选中区域（如"把背景变成蓝天"）
+- ✅ AI 抠图能正确移除背景（透明 PNG）
+- ✅ 基础旋转/翻转/裁剪操作正常
+- ✅ 覆盖保存后原图被替换，另存后图库多一张新图
+- ✅ 从详情页返回到图库，列表正确刷新
+
+**已完成增强功能**：
+
+| 功能 | 涉及改动 |
+|------|---------|
+| 混合架构分工 | 基础编辑走后端 Pillow（传 `operations` 参数非整图），AI 抠图纯前端 `@imgly/background-removal`，AI 区域编辑后端调视觉模型（API Key 不外泄） |
+| 统一保存策略 | 所有编辑场景提供 [覆盖保存] + [另存新图]；新增 `POST /{id}/replace` 接口（保留 id/名称/标签/关联，仅重写文件+缩略图+尺寸） |
+| AgentChat 多模态选图 | `chat()` 支持 `image_id` + 前端本地上传/图库选图（GalleryPicker） |
+| AI 抠图模型本地化 | @imgly 模型（271MB）本地化到 `frontend/public/background-removal/`，`publicPath` 指向本地 |
+| AI 区域编辑（涂鸦标记） | 原「遮罩图」方案弃用（SiliconFlow 无 mask 参数），改用红色涂鸦标记图 + `Qwen-Image-Edit-2509` 指令式编辑 |
+| 画笔体验优化 | 画笔粗细三档 / 六色可调 / 30% 不透明度 |
+| 图片改名 | `PATCH /{id}/name` 仅更新 `custom_name`（保留 `original_name`） |
+
+---
+
+**架构分工决策**：
 
 混合架构：轻操作走后端参数化接口，重操作走前端处理，AI 区域编辑因密钥约束走后端。
 
 | 功能 | 处理位置 | 数据流向 | 保存方式 |
 |------|---------|---------|---------|
-| **基础编辑**（旋转/翻转/裁剪） | 前端 Canvas 预览 + **后端 Pillow 执行** | 前端传 `operations` 参数（非图片） | `POST /{id}/edit` 覆盖/另存 |
-| **AI 抠图** | **纯前端** `@imgly/background-removal` | 浏览器端模型推理，输出透明 PNG blob | 上传 blob 保存（见下方保存链路） |
-| **AI 区域编辑** | 前端生成遮罩 + **后端调视觉模型** | 前端传 遮罩+原图+指令，后端流式返回结果图 | 后端保存结果（见下方保存链路） |
+| 基础编辑（旋转/翻转/裁剪） | 前端 Canvas 预览 + 后端 Pillow 执行 | 前端传 `operations` 参数（非图片） | `POST /{id}/edit` 覆盖/另存 |
+| AI 抠图 | 纯前端 `@imgly/background-removal` | 浏览器端推理，输出透明 PNG blob | 上传 blob 保存 |
+| AI 区域编辑 | 前端生成遮罩 + 后端调视觉模型 | 前端传遮罩+原图+指令，后端流式返回结果图 | 后端保存结果 |
 
 **为什么这样分工**：
-- 基础编辑用 Pillow 是毫秒级，并发无压力，传参数比传整图更高效
+- 基础编辑用 Pillow 毫秒级，并发无压力，传参数比传整图更高效
 - AI 抠图是重量级模型推理，放前端省后端算力 + 免去 rembg 模型下载
 - AI 区域编辑必须后端：大模型 API Key 不能暴露在前端
 
-**保存策略（已确定）**：所有编辑场景统一提供 `[覆盖保存]` + `[另存新图]` 两个选项。
+**保存策略（已确定）**：所有编辑场景统一提供 `[覆盖保存]` + `[另存新图]`。
 
 | 场景 | 覆盖原图 | 另存新图 |
 |------|---------|---------|
@@ -527,176 +571,22 @@ new-picture-train/： (项目根目录){
 | AI 抠图（前端 blob） | `POST /{id}/replace`（新增） | `POST /images/upload`（复用） |
 | AI 区域编辑（后端结果图） | `POST /{id}/replace`（新增） | 后端直接存新记录 |
 
-**决策**：新增 `POST /{id}/replace` 接口（接收 multipart 图片文件），用于 AI 抠图/区域编辑结果的"覆盖原图"。覆盖时保留原记录（id、名称、标签、关联），仅重写文件 + 重生成缩略图 + 更新宽高/大小。
+---
 
-#### 8.1 AgentChat 从图库选择图片分析
+**实际实现与踩坑记录**
 
-✅ **已完成**（后端 chat() 支持 image_id）：
-
-| 改动 | 文件 | 说明 |
-|------|------|------|
-| ChatRequest 加 image_id | `backend/src/schemas/agent.py` | `image_id: int \| None = None` |
-| chat() 支持多模态 | `backend/src/services/agent_service.py` | 有 image_id 时查图片→base64→追加多模态 message |
-| /chat 端点前置校验 | `backend/src/routers/agent.py` | 查图片存在性 + 模型类型校验（text 模型拒绝带图请求） |
-
-✅ **已完成**（前端本地上传图片分析）：
-
-| 改动 | 文件 | 说明 |
-|------|------|------|
-| 本地上传按钮 | `frontend/src/views/AgentChat.vue` | 📎按钮 → `<input type="file">` → `uploadImage()` → 拿 `image_id` |
-| 附件预览 + 自动切视觉模型 | 同上 | 缩略图预览条 + 模型选择器锁定 + 移除恢复 |
-| chatStream 加 imageId 参数 | `frontend/src/api/agent.ts` | 可选参数，发送时拼入 `body.image_id` |
-
-✅ **已完成**（图库选图弹窗集成）：
-
-| 改动 | 文件 | 说明 |
-|------|------|------|
-| GalleryPicker 弹窗组件 | `frontend/src/views/GalleryPicker.vue`（新建） | 遮罩弹窗 + 图片网格 + 搜索防抖，点击选中 emit |
-| AgentChat 集成选图按钮 | `frontend/src/views/AgentChat.vue` | 输入区加"选图"按钮 → 打开弹窗 → 选中后走同一套 attachedImage 流程 |
-
-#### 8.2 图片编辑与保存接口（后端）
-
-✅ **已完成**：
-
-| 改动 | 文件 | 说明 |
-|------|------|------|
-| EditOperation + EditImageRequest | `backend/src/schemas/image.py` | `type: rotate/flip/crop` + 对应参数 |
-| edit_image() 服务函数 | `backend/src/services/image_service.py` | Pillow 按序执行操作：旋转→翻转→裁剪；覆盖=重写原文件+缩略图；另存=新文件+新记录 |
-| replace_image() 服务函数 | `backend/src/services/image_service.py` | 接收新图片文件，覆盖原 file_path + 重生成缩略图 + 更新尺寸，保留原记录 |
-| POST /{id}/edit 端点 | `backend/src/routers/images.py` | 接收操作列表 + save_mode，返回 ImageUploadResponse |
-| POST /{id}/replace 端点 | `backend/src/routers/images.py` | 接收 multipart 图片文件，覆盖原图，返回 ImageUploadResponse |
-
-**API 协议**：
-
-```json
-POST /api/images/{id}/edit
-{
-  "operations": [
-    {"type": "rotate", "angle": 90},
-    {"type": "flip", "direction": "horizontal"},
-    {"type": "crop", "left": 100, "top": 50, "right": 500, "bottom": 450}
-  ],
-  "save_mode": "overwrite",
-  "custom_name": "编辑后的图"
-}
-```
-
-**replace 接口（AI 结果覆盖原图）**：
-
-```
-POST /api/images/{id}/replace
-Content-Type: multipart/form-data
-Body: file = 编辑后的图片文件
-
-后端逻辑：覆盖原 file_path → 重生成缩略图 → 更新 width/height/file_size → 保留原记录
-```
-
-#### 8.3 图片详情页 Detail.vue
-
-**目标**：双击图库中的图片 → 进入详情页，支持基础编辑 + AI 编辑，可选择覆盖或另存。
-
-**设计布局**：
-┌──────────────────────────────────────────┐
-│  ← 返回图库      图片详情                   │
-├──────────────┬───────────────────────────┤
-│              │  工具栏:                   │
-│  Fabric.js   │  [旋转] [翻转] [裁剪]       │
-│  画布        │  画笔: [选择][画笔][矩形]    │
-│  (涂鸦+预览) │  画笔大小: [=====]           │
-│              │  [AI抠图]                  │
-│              │                           │
-│              │  图片信息:                 │
-│              │  名称 / 尺寸 / 大小 / 日期  │
-│              │                           │
-│              │  AI 编辑:                  │
-│              │  [输入指令: "换成蓝天..." ] │
-│              │  [AI区域编辑]              │
-├──────────────┴───────────────────────────┤
-│     [下载]          [覆盖保存] [另存为新]    │
-└──────────────────────────────────────────┘
-
-✅ **已完成**：
-
-| 步骤 | 文件 | 内容 |
-|------|------|------|
-| 8.3.1 | `frontend/src/router/index.ts` | 新增路由 `{ path: "/detail/:id", component: Detail }` |
-| 8.3.2 | `frontend/src/components/ImageCard.vue` | 加 `@dblclick` → `router.push("/detail/" + id)` |
-| 8.3.3 | `frontend/src/api/images.ts` | 新增 `editImage(id, operations, saveMode, customName?)` + `replaceImage(id, blob)` |
-| 8.3.4 | `frontend/src/views/Detail.vue`（新建） | 核心编辑页，见下方详细设计 |
-| 8.3.5 | `npm install @imgly/background-removal` | 安装依赖（**未用 Fabric.js**，改用原生 Canvas，见下方说明） |
-
-**Detail.vue 核心逻辑设计（实际落地）**：
-- **未用 Fabric.js**，改用原生 Canvas + 「操作序列」模型：`operations` 数组记录用户操作（rotate/flip/crop），`applyOperation` 按序重绘。预览 = 从原图 `sourceCanvas` 重放整个操作序列，因此支持任意顺序组合（如先翻转 → 再裁剪 → 再旋转），且与后端 Pillow 执行顺序一致。
-- 基础编辑（旋转/翻转/裁剪）→ 前端 Canvas 实时预览 + 后端 Pillow 执行（传 `operations` 参数，非整图）
-- AI 抠图 → `@imgly/background-removal` 浏览器端处理 → 替换 `sourceCanvas`（`aiProcessed=true`）
-- AI 区域编辑 → 独立涂鸦层生成「提示图」（原图 + 红色标记）→ `POST /api/images/{id}/ai-edit` → 后端调 SiliconFlow → 返回结果图 base64 → 替换 `sourceCanvas`
-- 用户点击保存（两个按钮，按编辑类型路由）：
-a. [覆盖保存]
-   - 基础编辑 → POST /api/images/{id}/edit save_mode=overwrite
-   - AI 抠图/AI区域编辑 → POST /api/images/{id}/replace（传结果图 blob）
-b. [另存新图]
-   - 基础编辑 → POST /api/images/{id}/edit save_mode=new
-   - AI 抠图/AI区域编辑 → POST /api/images/upload（传结果图 blob）
-
-#### 8.4 AI 抠图与区域编辑（参考项目思路 + 混合架构落地）
-
-✅ **已完成**：8.4.1 AI 抠图（前端 @imgly + 模型本地化）、8.4.2 AI 区域编辑（前端涂鸦 + 后端 SiliconFlow）。实际实现与下方"参考项目思路"的差异见文末「实际实现与踩坑记录」小节。
-
-**参考项目关键发现**：
-
-| 功能 | 参考项目实现方式 | 对我们的价值 |
-|------|-----------------|-------------|
-| **AI 区域编辑（核心亮点）** | 画笔/矩形框选区域 → 生成二值遮罩 → 将遮罩图+原图作为两张 base64 发送给视觉模型 → 模型只修改遮罩覆盖区域 | **应采纳**：取代简单的旋转翻转，实现"涂鸦指定区域 + 自然语言描述修改" |
-| **AI 抠图** | `@imgly/background-removal` 纯前端 npm 包，第一次加载下载模型（~40MB），之后缓存 | **建议采纳**：比后端 `rembg` 方案更简单，零后端依赖 |
-| **套索工具** | 自由/多边形/磁性套索三种模式 | 可后期增强，初期用画笔+矩形即可 |
-| **图层系统** | 多层叠加、排序、显隐、锁定 | 对 MVP 过重，初期简化：画布 = 原图层 + 遮罩层 |
-| **Fabric.js** | 无限画布、缩放平移、撤销重做 | Vue3 中通过 `onMounted` 初始化，API 不变 |
-
-**AI 区域编辑的 Prompt 设计**：
-
-```json
-系统指令（构造给视觉模型的 messages）:
-user: [
-  { type: "text", text: "请严格按照遮罩区域编辑图片。白色区域是需要修改的部分，黑色区域保持原样。" + user_input },
-  { type: "image_url", image_url: { url: "data:image/png;base64,<原图>" } },
-  { type: "image_url", image_url: { url: "data:image/png;base64,<遮罩图>" } }
-]
-```
-
-> **注意**：这需要视觉模型同时理解两张图片（原图+遮罩）和一条指令。不是所有视觉模型都能很好地执行遮罩编辑，需实测验证可用模型。
-
-> ⚠️ **实际未采用此「遮罩图」方案**：调研发现 SiliconFlow 的 `images/generations` API 不支持显式 mask 参数，因此改为「涂鸦标记图 + 指令式编辑」，详见文末「实际实现与踩坑记录」。
-
-**验收标准（✅ 已全部通过）**：
-- 双击图库图片进入详情页，能看到原图
-- 能在画布上涂鸦/画矩形标记区域
-- 点击"AI 区域编辑"后 AI 能修改选中区域（如"把背景变成蓝天"）
-- AI 抠图能正确移除背景（透明 PNG）
-- 基础旋转/翻转/裁剪操作正常
-- 覆盖保存后原图被替换，另存后图库多一张新图
-- 从详情页返回到图库，列表正确刷新
-
-#### 实际实现与踩坑记录
-
-**8.4.1 AI 抠图**：
+**踩坑**：
 
 | 踩坑 | 根因 | 解决 |
 |------|------|------|
-| 模型下载卡死半小时 | 模型文件不在 npm 包内（`resources.json` 为空），默认从境外 CDN `staticimgly.com` 下载，国内网络卡死 | 下载官方模型包 `package.tgz`（271MB）本地化到 `frontend/public/background-removal/`，配置 `publicPath` 指向本地 |
 | `Invalid base URL` | `publicPath` 传相对路径 `/background-removal/`，库内部 `new URL(rel, base)` 要求 base 为绝对 URL | 改为 `window.location.origin + "/background-removal/"` |
 | 生产模式返回 HTML | `/background-removal` 未挂载静态目录，请求落到 SPA fallback 返回 index.html | `main.py` 挂载 `StaticFiles`（必须放在 SPA fallback 之前） |
 | 覆盖保存 400「不支持的图片格式」 | `replaceImage` 传裸 `Blob`，`FormData.append` 后文件名是 `"blob"` 无扩展名，后端 `splitext` 得到空串 | 包成 `new File([blob], "result.png", { type: "image/png" })` |
-| 主页仍显示旧图 | 覆盖后图片 URL 不变但内容变了，浏览器缓存旧缩略图/原图 | 后端给 `/static/uploads` 加 `Cache-Control: no-cache`（配合 ETag 走 304） |
-
-**8.4.2 AI 区域编辑**：
-
-| 踩坑 | 根因 | 解决 |
-|------|------|------|
 | 原「遮罩图」方案走不通 | 调研发现 SiliconFlow `images/generations` 无 mask 参数 | 改用「涂鸦标记图」：前端把红色涂鸦叠到原图上作为 `image`，`prompt` 说明"仅改红色标记区域"；模型用 `Qwen/Qwen-Image-Edit-2509`（指令式编辑） |
 | 前端 10s 超时 | AI 推理约 60s，远超 axios 全局 `timeout: 10000` | `aiEditImage` 单独设 `timeout: 300000` |
-| 改了前端代码不生效 | 生产模式跑 `dist`，改完没 `npm run build` / 浏览器缓存旧 bundle | 每次改前端后 `npm run build` + `Ctrl+F5` 强制刷新 |
+| 改名接口报 `RuntimeError: no running event loop` | `rename_image` 写成同步 `def` 被 FastAPI 丢进线程池执行，线程池无事件循环，`asyncio.create_task` 清缓存报错 | 改成 `async def`（与 `upload`/`delete_image` 一致），让端点在事件循环里跑 |
 
-**8.4.2 画笔体验优化（后续迭代）**：
+**画笔体验优化**：
 
 | 优化 | 说明 |
 |------|------|
@@ -704,14 +594,253 @@ user: [
 | 画笔颜色可调 | `brushColors` 六色（红/蓝/绿/黄/黑/白），涂鸦标记色经 `color_name` 传入后端动态拼接 prompt |
 | 降低不透明度 | `brushOpacity = 0.3`，让涂鸦下方的原图透出，避免误涂不想改的区域 |
 
-**通用工程化踩坑**：
+---
 
-| 踩坑 | 根因 | 解决 |
+### 阶段 9：公共图库与角色权限（审核流）
+
+**学习目标**：数据库迁移（Alembic）、RBAC 角色权限、审核流状态机、公共资源引用与删除保护。
+
+**我会讲解的内容**：
+- Alembic 迁移：如何给「已有数据库」引入迁移机制（基线 stamp + 增量迁移），做到加列/建表不丢数据
+- RBAC 角色模型：`role` 字段 + `require_admin` 依赖注入
+- 审核流状态机：pending → approved / rejected，以及撤回、下架
+- 「引用原图」vs「复制文件」的取舍，及引用关系下的删除保护
+
+> **本阶段已完成并验证通过（提交 → 审核 → 级联删除闭环已跑通）。**
+
+**数据层（Alembic 迁移）**：
+
+`users` 表加列：
+
+```python
+role = Column(String(20), nullable=False, default="user", comment="角色：user/admin")
+```
+
+新增 `public_images` 表：
+
+```python
+class PublicImage(Base):
+    __tablename__ = "public_images"
+    id             = Column(Integer, primary_key=True, autoincrement=True, index=True)
+    image_id       = Column(Integer, ForeignKey("images.id"), nullable=False, index=True)
+    user_id        = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    status         = Column(String(20), nullable=False, default="pending", index=True)  # pending/approved/rejected
+    review_comment = Column(String(255), nullable=True)
+    reviewed_by    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at    = Column(DateTime, nullable=True)
+    created_at     = Column(DateTime, default=datetime.now)
+```
+
+**索引设计**：
+
+| 索引 | 覆盖场景 |
+|------|---------|
+| `(status, created_at)` 复合索引 | 公共库浏览（approved 倒序）+ 待审核列表（pending 倒序） |
+| `(user_id, created_at)` 复合索引 | 「我的提交」列表 |
+| `image_id` 单列索引 | 删除图片时查「是否被公共库引用」 |
+
+**接口设计**：
+
+| 方法 & 路径 | 权限 | 说明 |
+|------------|------|------|
+| `POST /api/public/images` | 登录用户 | 提交到公共库（仅 `image_id`，从自己图库选图）；校验归属 + 防重复提交 |
+| `GET /api/public/images` | 登录用户 | 浏览公共库，只返回 `approved`，分页 + 可选搜索 |
+| `GET /api/public/images/my` | 登录用户 | 我的提交记录（含各状态） |
+| `GET /api/public/images/pending` | 管理员 | 待审核列表 |
+| `POST /api/public/images/{id}/review` | 管理员 | 审核：`{ action: "approve"\|"reject", comment }` |
+| `POST /api/public/images/{id}/remove` | 管理员 | 下架（approved → rejected，附下架意见） |
+| `DELETE /api/public/images/{id}` | 提交者本人 | 作者删除自己的公共库记录（`pending` 撤回 / `approved` 主动删除 / `rejected` 清理记录） |
+
+**审核状态机**：
+
+```
+pending ──approve──▶ approved
+pending ──reject ──▶ rejected
+pending ──(作者撤回)──▶ 删除记录
+approved ──(作者主动删除)──▶ 删除记录
+rejected ──(作者清理)──▶ 删除记录
+approved ──(管理员下架)──▶ rejected（附下架意见）
+任意状态 ──(原图被删)──▶ 级联删除记录
+```
+
+**删除行为（引用原图方案）**：
+
+| 操作 | 结果 |
+|------|------|
+| 作者删除个人图库原图 | 级联删除该图片对应的所有 `public_images` 记录（任意状态） |
+| 作者删除公共库记录（`pending`/`approved`/`rejected`） | 仅删公共库记录，原图保留在个人图库 |
+
+**管理员产生方式**：脚本 `backend/scripts/promote_admin.py`，把指定 `username` 提升为 admin（贴近 Django `createsuperuser`，不手写 SQL、不丢数据）。
+
+**实战任务（已完成）**：
+
+| 步骤 | 文件 | 内容 |
 |------|------|------|
-| 后端 ImportError 起不来 | IDE 自动补全误加 `from ntpath import isdir`、`from fastapi import background` | 手动删除多余 import，警惕 IDE 自动补全导入无关模块 |
-| API 函数放错文件 | `replaceImage` 误加到 `stores/images.ts`（Pinia）而非 `api/images.ts`，报 `找不到名称 api` | API 调用统一放 `src/api/`，store 只做状态管理 |
+| 9.1 | `backend/pyproject.toml` | `uv add alembic` |
+| 9.2 | `backend/alembic/` | `alembic init` + 配置 `env.py`（`target_metadata = Base.metadata`）+ 基线 `stamp head` |
+| 9.3 | `backend/src/models/user.py` | `User` 加 `role` 字段 |
+| 9.4 | `backend/src/models/public_image.py` | 新增 `PublicImage` 模型 |
+| 9.5 | `backend/src/schemas/public_image.py` | 提交/审核请求 + 响应模型 |
+| 9.6 | `backend/src/services/public_service.py` | 提交/浏览/我的/待审/审核/下架/作者删除 业务逻辑 |
+| 9.7 | `backend/src/routers/public_images.py` | 上述 7 个端点 + `require_admin` 依赖 |
+| 9.8 | `backend/src/routers/public_images.py` | `require_admin` 依赖注入（定义在公共图库路由内：先鉴权，再校验 `role == "admin"`） |
+| 9.9 | `backend/scripts/promote_admin.py` | 管理员提升脚本 |
+| 9.10 | `frontend/src/views/PublicGallery.vue` | 公共图库浏览页 |
+| 9.11 | `frontend/src/views/AdminReview.vue` | 管理员审核页 |
+| 9.12 | `frontend/src/components/NavBar.vue` | 加「公共图库」（全员）+「审核」（仅 admin）入口 |
+| 9.13 | 图库/详情页 | 加「提交到公共图库」按钮 |
+| 9.14 | `frontend/src/views/Profile.vue` | 个人主页：我的提交进度 + 撤回/删除；配套 `/profile` 路由 + NavBar 用户名可点击进入 |
 
+**验收标准**：
+- ✅ Alembic 迁移后旧数据完整（用户/图片/标签不丢）
+- ✅ 普通用户能提交图片到公共库（只能从自己图库已有图片中选图）
+- ✅ 提交后状态为 `pending`，公共库不展示
+- ✅ 管理员审核通过后，公共库对所有人可见
+- ✅ 管理员可拒绝/下架，下架后公共库不再展示
+- ✅ 作者删除个人图库原图时，对应公共库记录级联删除
+- ✅ 用户可撤回自己的 `pending` 提交
+- ✅ 个人主页可查看提交进度，`pending` 撤回 / `approved`·`rejected` 删除记录
 
+**补漏与踩坑记录**：
+
+| 项目 | 说明 |
+|------|------|
+| 撤回前端入口补漏 | 阶段 9 初版只做了后端 `DELETE /{id}`，漏前端入口；补 `Profile.vue`（个人主页）+ `/profile` 路由 + NavBar 用户名可点击进入 |
+| 记录删除扩展 | `DELETE /{id}` 本身不限制状态，前端顺势给 `approved`/`rejected` 也加「删除」按钮（清理记录、降维护成本），复用同一接口 |
+| 上传 `NameError: EXTENSION_TO_MIME` | 并行编辑竞态导致 `image_service.py` 的 `EXTENSION_TO_MIME` 常量丢失，本地/URL 上传均 500；补回映射后恢复 |
+
+---
+
+### 阶段 10：公共图库详情页与可见性控制
+
+**学习目标**：公共图库独立详情页、三种角色权限矩阵、可切换的「可见性」字段与角色感知的列表过滤。
+
+**我会讲解的内容**：
+- 独立详情页 vs 复用个人详情页的取舍（职责分离 vs 代码复用）
+- 权限矩阵：管理员 / 上传者 / 其他普通用户 三种角色如何差异化展示操作按钮
+- `is_visible`（可见性）与 `status`（审核状态）两个维度的语义分离
+- 列表查询的「角色感知」过滤：同一接口按当前用户角色返回不同结果集
+
+> **本阶段为规划设计稿，代码待确认后实施。**
+
+**需求背景**：
+公共图库图片目前只能看缩略图，无法进入详情查看大图与完整信息。现要求：
+1. 公共图库双击图片进入详情页（与个人图库体验一致）。
+2. 管理员 / 上传者可对该图「从公共图库删除」+「切换普通用户可见性」。
+3. 其他普通用户进入详情页看不到任何操作按钮。
+
+**权限矩阵**：
+
+| 角色 | 是否上传者 | 删除公共库图片 | 切换可见性 |
+|------|-----------|--------------|-----------|
+| 管理员 | 任意 | ✅ | ✅ |
+| 普通用户 | 是 | ✅ | ✅ |
+| 普通用户 | 否 | ❌ | ❌ |
+
+**可见性语义**：
+- `is_visible` 独立于审核状态，仅对 `approved` 图片生效。
+- 设为「不可见」后：其他普通用户在公共库列表看不到该图；**上传者自己与管理员始终可见**。
+- 可反复切换，不影响审核状态。
+
+**数据层（Alembic 迁移）**：
+
+`public_images` 表加列：
+
+```python
+is_visible = Column(Boolean, nullable=False, default=True, server_default="1", comment="普通用户是否可见")
+```
+
+**接口设计（新增/变更）**：
+
+| 方法 & 路径 | 权限 | 说明 |
+|------------|------|------|
+| `GET /api/public/images`（变更） | 登录用户 | 角色感知过滤：普通用户返回 `approved + is_visible`；管理员返回全部 `approved`（含隐藏） |
+| `GET /api/public/images/{id}`（新增） | 登录用户 | 公共图片详情：返回图片信息 + 上传者 + `is_visible` + `is_owner`/`is_admin` 判断 |
+| `POST /api/public/images/{id}/visibility`（新增） | 管理员/上传者 | 切换可见性，body `{ visible: bool }` |
+| `DELETE /api/public/images/{id}`（变更） | 管理员/上传者 | 删除公共记录（原仅上传者本人，现扩展为管理员或上传者均可） |
+
+> 说明：`DELETE` 只删 `public_images` 记录、**不动原图**；原图删除仍走个人图库，由阶段 9 的级联逻辑同步清理公共记录。
+
+**前端路由与页面**：
+
+| 页面/组件 | 说明 |
+|-----------|------|
+| `/public` → `PublicGallery.vue` | 公共图库列表（现有，卡片双击改为跳详情） |
+| `/public/:id` → `PublicDetail.vue`（新建） | 公共图片详情页，`:id` 为公共记录 id |
+| 按钮显隐逻辑 | 按权限矩阵：管理员/上传者显示「删除」+「切换可见性」，其他普通用户隐藏 |
+
+**实战任务（待实施）**：
+
+| 步骤 | 文件 | 内容 |
+|------|------|------|
+| 10.1 | `backend/src/models/public_image.py` | `PublicImage` 加 `is_visible` 字段 |
+| 10.2 | `backend/alembic/` | `autogenerate` 增量迁移加 `is_visible` 列 |
+| 10.3 | `backend/src/schemas/public_image.py` | 详情响应模型 + 可见性请求模型 |
+| 10.4 | `backend/src/services/public_service.py` | `get_public_detail()`、`set_visibility()`、浏览过滤改为角色感知、`delete_public_image()` 扩展管理员权限 |
+| 10.5 | `backend/src/routers/public_images.py` | 新增 `GET /{id}`、`POST /{id}/visibility`；`DELETE /{id}` 放开管理员 |
+| 10.6 | `frontend/src/api/public.ts` | `getPublicDetail()`、`setPublicVisibility()` 封装 |
+| 10.7 | `frontend/src/views/PublicDetail.vue` | 新建公共详情页，按矩阵渲染按钮 |
+| 10.8 | `frontend/src/router/index.ts` | 新增 `/public/:id` 路由 |
+| 10.9 | `frontend/src/views/PublicGallery.vue` | 卡片 `@dblclick` → 跳 `/public/:id` |
+
+**验收标准**：
+- 公共图库双击图片进入独立详情页，能看到大图与上传者信息
+- 管理员在详情页可见「删除」+「切换可见性」两个按钮
+- 上传者本人可见「删除」+「切换可见性」两个按钮
+- 其他普通用户进入详情页看不到任何操作按钮
+- 设为不可见后，其他普通用户列表看不到该图，上传者/管理员仍可见
+- 删除只删公共记录，原图保留在个人图库
+
+---
+
+### 阶段 11：个人资料编辑
+
+**学习目标**：用户资料编辑（改名/改密码），表单校验、用户名唯一性、旧密码校验与密码哈希更新。
+
+**我会讲解的内容**：
+- 用户名唯一性校验（数据库唯一约束 + 服务层查重）
+- 改密码的正确姿势：先校验旧密码，再用 `hash_password` 存新哈希
+- JWT `sub` 存 `user_id` 而非 `username` 的好处：改名不使登录态失效
+- 前端表单与确认交互
+
+> **本阶段为规划设计稿，代码待确认后实施。**
+
+**需求背景**：
+个人主页已展示用户名与提交进度，但还无法编辑个人资料。补充两项能力：
+1. 修改账号名称（`username`）
+2. 修改密码（需校验旧密码）
+
+**数据层**：无需迁移——`users` 表已有 `username` 与 `hashed_password` 字段。
+
+**关键设计点**：
+- JWT `sub` 存的是 `user_id`（见 `get_current_user` 里 `int(payload.get("sub"))`），所以**改名不影响已登录状态**，无需重新登录。
+- 改名需查重，避免与他人冲突（服务层 `filter(User.username == ...)`）。
+- 改密码需 `verify_password(旧密码)` 通过后才允许更新，新密码用 `hash_password` 入库。
+
+**接口设计（新增）**：
+
+| 方法 & 路径 | 权限 | 说明 |
+|------------|------|------|
+| `PATCH /api/users/me` | 登录用户 | 修改 `username`，校验非空 + 唯一 |
+| `POST /api/users/me/password` | 登录用户 | 修改密码，校验旧密码 + 新密码 |
+
+**前端改动**：
+- `Profile.vue` 增加「资料编辑」区：改名表单 + 改密码表单。
+
+**实战任务（待实施）**：
+
+| 步骤 | 文件 | 内容 |
+|------|------|------|
+| 11.1 | `backend/src/schemas/user.py` | `UpdateUsernameRequest`、`ChangePasswordRequest` |
+| 11.2 | `backend/src/services/auth_service.py` | `update_username()`（查重 + 更新）、`change_password()`（验旧密码 + 哈希新密码） |
+| 11.3 | `backend/src/routers/users.py` | `PATCH /me`、`POST /me/password` |
+| 11.4 | `frontend/src/api/auth.ts` | `updateUsername()`、`changePassword()` 封装 |
+| 11.5 | `frontend/src/views/Profile.vue` | 资料编辑区（改名 + 改密码表单） |
+
+**验收标准**：
+- 改名成功后用户名立即生效，且无需重新登录
+- 改名为已存在的用户名时被拒绝
+- 改密码需正确旧密码；成功后可用新密码登录
 
 ---
 

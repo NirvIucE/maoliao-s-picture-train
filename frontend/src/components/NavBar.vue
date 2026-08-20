@@ -1,3 +1,11 @@
+<!--
+ * @Author: NirvIucE 1750682685@qq.com
+ * @Date: 2026-07-28 15:43:49
+ * @LastEditors: NirvIucE 1750682685@qq.com
+ * @LastEditTime: 2026-08-21 02:32:23
+ * @FilePath: \new-picture-train\frontend\src\components\NavBar.vue
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+-->
 <script setup lang="ts">
 import { useRouter } from "vue-router"
 import { useAuthStore } from "@/stores/auth"
@@ -16,8 +24,10 @@ const auth = useAuthStore()
             <template v-if="auth.isLoggedIn">
                 <router-link to="/upload">上传</router-link>
                 <router-link to="/gallery">我的图库</router-link>
+                <router-link to="/public">公共图库</router-link>
                 <router-link to="/agent">AI助手</router-link>
-                <span class="username">{{ auth.user?.username }}</span>
+                <router-link v-if="auth.user?.role === 'admin'" to="/admin/review">审核</router-link>
+                <router-link to="/profile" class="username">{{ auth.user?.username }}</router-link>
                 <button @click="auth.logout(); router.push('/login')">登出</button>
             </template>
             <template v-else>

@@ -18,6 +18,7 @@ from PIL import Image as PILImage
 
 from src.models.image import Image
 from src.models.user import User
+from src.models.public_image import PublicImage
 from src.schemas.image import ImageResponse
 from src.utils.image_utils import (
     get_image_dimensions,
@@ -37,6 +38,17 @@ CONTENT_TYPE_MAP = {
     "image/bmp": ".bmp",
     "image/webp": ".webp",
     "image/tiff": ".tiff",
+}
+
+# 扩展名 -> 标准 MIME 映射表（上传时统一存标准 MIME，避免 image/jpg 等非标准值）
+EXTENSION_TO_MIME = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".webp": "image/webp",
+    ".tiff": "image/tiff",
 }
 
 # Cache TTL 常量
@@ -181,6 +193,8 @@ def delete_image(db:Session, image_id: int, user: User) -> None:
     for path in [image.file_path, image.thumbnail_path]:
         if path and os.path.exists(path):
             os.remove(path)
+    # 级联删除公共图库引用记录（原图删除后，公共库对应条目失效）
+    db.query(PublicImage).filter(PublicImage.image_id == image.id).delete()
     #delete db record
     db.delete(image)
     db.commit()

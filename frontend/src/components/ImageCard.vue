@@ -3,10 +3,11 @@
 import { ref } from "vue"
 import { useRouter } from "vue-router"
 import { deleteImage, downloadOriginalImage } from "@/api/images"
+import { submitToPublic } from "@/api/public"
 import type { ImageItem } from "@/api/images"
 
 const props = defineProps<{ image: ImageItem }>()
-const emit = defineEmits<{ deleted: []; analyze: [image: ImageItem] }>()
+const emit = defineEmits<{ deleted: [] }>()
 
 const router = useRouter()
 const showConfirm = ref(false)
@@ -25,6 +26,15 @@ async function handleDelete() {
 
 async function handleDownload() {
   await downloadOriginalImage(props.image.id, props.image.original_name)
+}
+
+async function handleSubmitPublic() {
+  try {
+    await submitToPublic(props.image.id)
+    alert("已提交到公共图库，等待审核")
+  } catch (error: any) {
+    alert(error.response?.data?.detail || "提交失败")
+  }
 }
 
 function goDetail() {
@@ -51,6 +61,9 @@ function goDetail() {
             <div class="actions" @dblclick.stop>
               <button class="btn-download" @click="handleDownload">
                 下载原图
+              </button>
+              <button class="btn-public" @click="handleSubmitPublic">
+                提交公共库
               </button>
               <button v-if="!showConfirm" class="btn-delete" @click="showConfirm = true">删除</button>
               <div v-else class="confirm">
@@ -112,6 +125,15 @@ function goDetail() {
   border-radius: 4px;
   cursor: pointer;
   text-decoration: none;
+  font-size: 13px;
+}
+.btn-public {
+  padding: 3px 10px;
+  background: #67c23a;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
   font-size: 13px;
 }
 .btn-delete {

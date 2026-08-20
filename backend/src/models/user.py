@@ -17,6 +17,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, onupdate=datetime.now)
+    role = Column(String(20), nullable=False, default="user", server_default="user", comment="角色：user/admin")
     # ORM 关系
     from sqlalchemy.orm import relationship
     images = relationship("Image", back_populates="user")
