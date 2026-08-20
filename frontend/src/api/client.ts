@@ -1,3 +1,11 @@
+/*
+ * @Author: NirvIucE 1750682685@qq.com
+ * @Date: 2026-07-27 21:34:00
+ * @LastEditors: NirvIucE 1750682685@qq.com
+ * @LastEditTime: 2026-08-20 17:37:26
+ * @FilePath: \new-picture-train\frontend\src\api\client.ts
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+ */
 
 import axios, { type AxiosRequestConfig } from "axios"
 
@@ -42,6 +50,9 @@ const api = {
     },
     put<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
         return http.put(url, data, config) as any
+    },
+    patch<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
+        return http.patch(url, data, config) as any
     },
     delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
         return http.delete(url, config) as any

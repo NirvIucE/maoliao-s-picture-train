@@ -9,7 +9,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { getImageDetail, editImage, replaceImage, uploadImage, aiEditImage, type ImageItem, type EditOperation } from "@/api/images"
+import { getImageDetail, editImage, replaceImage, uploadImage, aiEditImage, updateImageName, type ImageItem, type EditOperation } from "@/api/images"
 import { removeBackground, type Config } from "@imgly/background-removal"
 
 const route = useRoute()
@@ -533,6 +533,35 @@ async function handleSave(mode: "overwrite" | "new") {
     saving.value = false
   }
 }
+
+// ===== 修改图片名称 =====
+const renaming = ref(false)
+const newName = ref("")
+const renamingSaving = ref(false)
+
+function startRename() {
+  newName.value = image.value?.display_name || ""
+  renaming.value = true
+}
+
+function cancelRename() {
+  renaming.value = false
+  newName.value = ""
+}
+
+async function confirmRename() {
+  if (!image.value || renamingSaving.value) return
+  renamingSaving.value = true
+  try {
+    const updated = await updateImageName(image.value.id, newName.value.trim())
+    image.value = updated
+    renaming.value = false
+  } catch (err: any) {
+    alert(err.response?.data?.detail || "修改名称失败")
+  } finally {
+    renamingSaving.value = false
+  }
+}
 </script>
 
 <template>
@@ -647,7 +676,19 @@ async function handleSave(mode: "overwrite" | "new") {
                 <p v-if="aiEditMode" class="ops-hint">用鼠标在图片上涂抹要修改的区域（红色标记），再输入指令</p>
                 <h3>图片信息</h3>
                 <ul class="info-list">
-                    <li>名称：{{ image.display_name }}</li>
+                    <li>
+                        <div class="name-row">
+                            <template v-if="!renaming">
+                                <span class="name-text">名称：{{ image.display_name }}</span>
+                                <button class="tool-btn rename-btn" @click="startRename">改名</button>
+                            </template>
+                            <template v-else>
+                                <input v-model="newName" class="rename-input" placeholder="输入新名称" @keyup.enter="confirmRename" />
+                                <button class="tool-btn" @click="confirmRename" :disabled="renamingSaving">确定</button>
+                                <button class="tool-btn" @click="cancelRename" :disabled="renamingSaving">取消</button>
+                            </template>
+                        </div>
+                    </li>
                     <li>尺寸：{{ image.width }} × {{ image.height }}</li>
                     <li>大小：{{ (image.file_size / 1024).toFixed(1) }} KB</li>
                     <li>上传时间：{{ new Date(image.created_at).toLocaleString() }}</li>
@@ -767,6 +808,10 @@ async function handleSave(mode: "overwrite" | "new") {
 .ops-hint { font-size: 12px; color: #909399; margin: 8px 0; }
 .info-list { list-style: none; padding: 0; margin: 0; }
 .info-list li { padding: 6px 0; font-size: 13px; color: #606266; border-bottom: 1px solid #f0f0f0; word-break: break-all; }
+.name-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.name-text { flex: 1; word-break: break-all; }
+.rename-btn { padding: 2px 8px; font-size: 12px; flex-shrink: 0; }
+.rename-input { flex: 1; min-width: 100px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; box-sizing: border-box; }
 
 .detail-footer { margin-top: 20px; text-align: right; }
 .btn-save { padding: 10px 28px; background: #409eff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; }

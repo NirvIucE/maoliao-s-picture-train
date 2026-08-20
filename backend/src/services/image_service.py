@@ -76,7 +76,7 @@ def save_upload_file(upload_file: UploadFile, custom_name: str | None = None) ->
         "custom_name": custom_name,
         "date_dir": date_dir,
         "file_size": os.path.getsize(original_path),
-        "mime_type": f"image/{original_ext[1:]}",
+        "mime_type": EXTENSION_TO_MIME.get(original_ext, f"image/{original_ext[1:]}"),
         "width": width,
         "height": height,
         "file_path": original_path,
@@ -281,7 +281,7 @@ def replace_image(db: Session, image_id: int, file: UploadFile, user: User) -> I
         new_filename = f"{uuid.uuid4().hex}{new_ext}"
         new_path = os.path.join(os.path.dirname(image.file_path), new_filename)
         image.filename = new_filename
-        image.mime_type = f"image/{new_ext[1:]}"
+        image.mime_type = EXTENSION_TO_MIME.get(new_ext, f"image/{new_ext[1:]}")
         image.file_path = new_path
     else:
         new_path = image.file_path
@@ -299,6 +299,17 @@ def replace_image(db: Session, image_id: int, file: UploadFile, user: User) -> I
 
     db.commit()
     db.refresh(image)
+    asyncio.create_task(cache_delete_pattern(f"images:user:{user.id}:*"))
+    return image
+
+def update_image_name(db: Session, image_id: int, custom_name: str, user: User) -> Image:
+    """修改图片自定义名称（仅更新 custom_name，空串恢复原文件名）"""
+    image = get_image_detail(db, image_id, user)
+    name = custom_name.strip()
+    image.custom_name = name or None
+    db.commit()
+    db.refresh(image)
+    # 改名后清除该用户的图片列表缓存，避免图库显示旧名
     asyncio.create_task(cache_delete_pattern(f"images:user:{user.id}:*"))
     return image
 

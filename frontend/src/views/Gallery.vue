@@ -13,21 +13,9 @@ import { onMounted, ref } from 'vue';
 import { useImageStore } from '@/stores/images';
 import ImageCard from '@/components/ImageCard.vue';
 
-import AgentDialog from "@/components/AgentDialog.vue"
-import type { ImageItem } from "@/api/images"
-
 
 const imageStore = useImageStore()
 const searchInput = ref("")
-
-// AI 分析弹窗
-const analyzeVisible = ref(false)
-const analyzeImage = ref<ImageItem | null>(null)
-
-function onAnalyze(image: ImageItem) {
-  analyzeImage.value = image
-  analyzeVisible.value = true
-}
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -67,16 +55,9 @@ onMounted(() => {
         :key="image.id" 
         :image="image"
         @deleted="imageStore.fetchImages(0,20, searchInput || undefined)"
-        @analyze="onAnalyze"
       />
     </div>
     <p class="count">共显示 {{ imageStore.total }} 张图片</p>
-
-    <AgentDialog
-      :image="analyzeImage"
-      :visible="analyzeVisible"
-      @close="analyzeVisible = false"
-    />
     
   </div>
 </template>

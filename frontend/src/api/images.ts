@@ -69,6 +69,11 @@ export function deleteImage(imageId: number): Promise<{ message: string }> {
     return api.delete(`/images/${imageId}`)
 }
 
+// 修改图片名称
+export function updateImageName(imageId: number, customName: string): Promise<ImageItem> {
+    return api.patch(`/images/${imageId}/name`, { custom_name: customName })
+}
+
 // 下载原图URL（直接打开即可触发浏览器下载）
 export function getDownloadUrl(imageId: number): string {
     return `/api/images/${imageId}/download`

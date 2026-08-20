@@ -52,9 +52,6 @@ function goDetail() {
               <button class="btn-download" @click="handleDownload">
                 下载原图
               </button>
-              <button class="btn-analyze" @click="emit('analyze', image)">
-                AI 分析
-              </button>
               <button v-if="!showConfirm" class="btn-delete" @click="showConfirm = true">删除</button>
               <div v-else class="confirm">
                 <span>确认？</span>
@@ -115,15 +112,6 @@ function goDetail() {
   border-radius: 4px;
   cursor: pointer;
   text-decoration: none;
-  font-size: 13px;
-}
-.btn-analyze {
-  padding: 3px 10px;
-  background: #e6a23c;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
   font-size: 13px;
 }
 .btn-delete {

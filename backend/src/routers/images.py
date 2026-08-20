@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from src.database import get_db
 from src.models.user import User
-from src.schemas.image import ImageResponse, ImageListResponse, ImageUploadResponse, EditImageRequest, AIEditRequest, AIEditResponse
+from src.schemas.image import ImageResponse, ImageListResponse, ImageUploadResponse, EditImageRequest, AIEditRequest, AIEditResponse, UpdateImageNameRequest
 from src.services import image_service
 from src.routers.users import get_current_user
 
@@ -88,6 +88,17 @@ async def delete_image(
     """删除图片"""
     image_service.delete_image(db, image_id, current_user)
     return {"message": "图片删除成功"}
+
+
+@router.patch("/{image_id}/name", response_model=ImageResponse)
+async def rename_image(
+    image_id: int,
+    req: UpdateImageNameRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """修改图片名称"""
+    return image_service.update_image_name(db, image_id, req.custom_name, current_user)
 
 
 @router.post("/{image_id}/edit", response_model=ImageUploadResponse)

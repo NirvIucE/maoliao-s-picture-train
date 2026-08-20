@@ -6,7 +6,7 @@ ImageResponse、ImageUploadResponse 等
 
 from datetime import datetime
 from typing import Optional, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class ImageResponse(BaseModel):
     """单张图片响应"""
@@ -67,3 +67,7 @@ class AIEditRequest(BaseModel):
 class AIEditResponse(BaseModel):
     """AI 区域编辑响应"""
     image_base64: str    # 结果图的 base64 data URL
+
+class UpdateImageNameRequest(BaseModel):
+    """修改图片名称请求"""
+    custom_name: str = Field(..., max_length=255, description="新名称，空字符串表示恢复原文件名")
