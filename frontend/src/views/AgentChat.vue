@@ -1,11 +1,4 @@
-<!--
- * @Author: NirvIucE 1750682685@qq.com
- * @Date: 2026-07-28 15:46:24
- * @LastEditors: NirvIucE 1750682685@qq.com
- * @LastEditTime: 2026-08-20 17:21:56
- * @FilePath: \new-picture-train\frontend\src\views\AgentChat.vue
- * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
--->
+
 <!-- AI 助手页 -->
 <script setup lang="ts">
 import { ref, nextTick } from "vue"

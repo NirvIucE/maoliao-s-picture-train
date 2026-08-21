@@ -18,6 +18,8 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, onupdate=datetime.now)
     role = Column(String(20), nullable=False, default="user", server_default="user", comment="角色：user/admin")
+    uid = Column(String(36), unique=True, nullable=False, index=True, comment="对外唯一标识（UUID，不可修改）")
+    avatar_url = Column(String(512), nullable=True, comment="头像 URL")
     # ORM 关系
     from sqlalchemy.orm import relationship
     images = relationship("Image", back_populates="user")

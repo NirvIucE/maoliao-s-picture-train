@@ -1,15 +1,20 @@
 """
 获取当前用户（需要 JWT 鉴权）
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordBearer
 
 from src.database import get_db
 from src.models.user import User
-from src.schemas.user import UserResponse
+from src.schemas.user import UserResponse, UpdateUsernameRequest, ChangePasswordRequest
 from src.utils.security import decode_access_token
-from src.services.auth_service import get_cached_user
+from src.services.auth_service import (
+    get_cached_user,
+    update_username,
+    change_password,
+    update_avatar,
+)
 
 router = APIRouter(prefix="/api/users", tags=["用户"])
 
@@ -38,4 +43,36 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
 async def get_me(current_user: User = Depends(get_current_user)):
     """获取当前登录用户信息"""
     return current_user
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_me(
+    req: UpdateUsernameRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """修改用户名"""
+    return update_username(db, current_user, req.username)
+
+
+@router.post("/me/password")
+async def change_my_password(
+    req: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """修改密码"""
+    change_password(db, current_user, req.old_password, req.new_password)
+    return {"message": "密码已更新"}
+
+
+@router.post("/me/avatar")
+async def upload_my_avatar(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """上传头像"""
+    avatar_url = update_avatar(db, current_user, file)
+    return {"avatar_url": avatar_url}
     
