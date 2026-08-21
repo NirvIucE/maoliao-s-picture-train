@@ -32,3 +32,6 @@ dist/
 # 个人计划文档（不推送到远程仓库）
 plan.md
 learning-roadmap-plan.md
+
+# 个人 IDE 插件配置（含个人邮箱，不推送到远程仓库）
+fileheader.config.json
