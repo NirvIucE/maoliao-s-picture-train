@@ -92,3 +92,91 @@ def db_session():
 def client(db_session, fake_redis):
     """TestClient，已注入隔离 session + fakeredis"""
     yield TestClient(app)
+
+
+# ── 便利 fixtures：减少接口测试样板代码（见计划 3.3 步骤 3）──
+from io import BytesIO  # noqa: E402
+
+from PIL import Image as PILImage  # noqa: E402
+
+
+@pytest.fixture
+def registered_user(client):
+    """注册一个普通用户 alice，返回 {username, email, password, uid, id}"""
+    payload = {"username": "alice", "email": "alice@test.com", "password": "pass1234"}
+    r = client.post("/api/auth/register", json=payload)
+    assert r.status_code == 201, f"注册失败: {r.text}"
+    data = r.json()
+    return {
+        "username": payload["username"],
+        "email": payload["email"],
+        "password": payload["password"],
+        "uid": data["uid"],
+        "id": data["id"],
+    }
+
+
+@pytest.fixture
+def auth_headers(client, registered_user):
+    """登录 registered_user，返回 Authorization headers"""
+    r = client.post(
+        "/api/auth/login",
+        data={
+            "username": registered_user["username"],
+            "password": registered_user["password"],
+        },
+    )
+    assert r.status_code == 200, f"登录失败: {r.text}"
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+@pytest.fixture
+def admin_user(client, db_session):
+    """注册并提权一个 admin，返回 {username, password, uid, id}"""
+    payload = {"username": "admin", "email": "admin@test.com", "password": "admin1234"}
+    r = client.post("/api/auth/register", json=payload)
+    assert r.status_code == 201, f"admin 注册失败: {r.text}"
+    # 提权（get_cached_user 即使命中也会重查 DB，role 永远最新，无缓存陈旧）
+    from src.models.user import User
+
+    admin = db_session.query(User).filter_by(username="admin").first()
+    assert admin is not None
+    admin.role = "admin"
+    db_session.commit()
+    data = r.json()
+    return {
+        "username": payload["username"],
+        "password": payload["password"],
+        "uid": data["uid"],
+        "id": data["id"],
+    }
+
+
+@pytest.fixture
+def admin_headers(client, admin_user):
+    """登录 admin，返回 Authorization headers"""
+    r = client.post(
+        "/api/auth/login",
+        data={
+            "username": admin_user["username"],
+            "password": admin_user["password"],
+        },
+    )
+    assert r.status_code == 200, f"admin 登录失败: {r.text}"
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+@pytest.fixture
+def test_image(client, auth_headers):
+    """上传一张 PNG，返回 image_id"""
+    buf = BytesIO()
+    PILImage.new("RGB", (10, 10), (255, 0, 0)).save(buf, format="PNG")
+    buf.seek(0)
+    r = client.post(
+        "/api/images/upload",
+        headers=auth_headers,
+        files={"file": ("test.png", buf, "image/png")},
+        data={"custom_name": "fixture 图"},
+    )
+    assert r.status_code == 200, f"上传失败: {r.text}"
+    return r.json()["id"]
