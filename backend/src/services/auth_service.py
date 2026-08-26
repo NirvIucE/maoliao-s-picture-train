@@ -5,14 +5,13 @@
 import os
 import uuid
 
+from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
-from fastapi import HTTPException, status, UploadFile
 
+from src.cache import cache_get, cache_set
 from src.models.user import User
 from src.schemas.user import UserCreate
-from src.utils.security import hash_password, verify_password, create_access_token
-
-from src.cache import cache_get, cache_set, cache_delete
+from src.utils.security import create_access_token, hash_password, verify_password
 
 USER_INFO_TTL = 600 # 用户信息缓存10分钟
 

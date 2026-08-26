@@ -15,9 +15,11 @@ import json
 import logging
 import time
 from typing import Any
+
 import redis.asyncio as aioredis
 from redis.exceptions import RedisError
-from src.config import REDIS_HOST, REDIS_PORT, REDIS_DB, REDIS_PASSWORD
+
+from src.config import REDIS_DB, REDIS_HOST, REDIS_PASSWORD, REDIS_PORT
 
 logger = logging.getLogger(__name__)
 

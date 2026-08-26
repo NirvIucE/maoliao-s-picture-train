@@ -1,8 +1,9 @@
 """
 标签表模型 + image_tags 多对多关联
 """
-from sqlalchemy import Column, Integer, String, Table, ForeignKey
+from sqlalchemy import Column, ForeignKey, Integer, String, Table
 from sqlalchemy.orm import relationship
+
 from src.database import Base
 
 #多对多中间表

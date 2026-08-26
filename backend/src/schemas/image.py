@@ -5,23 +5,25 @@ ImageResponse、ImageUploadResponse 等
 """
 
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
 
 class ImageResponse(BaseModel):
     """单张图片响应"""
     id: int
     filename: str
     original_name: str
-    custom_name: Optional[str] = None
+    custom_name: str | None = None
     display_name: str
     file_size: int
     mime_type: str
-    width: Optional[int] = None
-    height: Optional[int] = None
+    width: int | None = None
+    height: int | None = None
     created_at: datetime
-    thumbnail_url: Optional[str] = None
-    image_url: Optional[str] = None
+    thumbnail_url: str | None = None
+    image_url: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -34,7 +36,7 @@ class ImageUploadResponse(BaseModel):
     """上传成功响应"""
     id: int
     original_name: str
-    custom_name: Optional[str] = None
+    custom_name: str | None = None
     display_name: str
     file_size: int
     width: int

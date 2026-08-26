@@ -6,17 +6,17 @@ from sqlalchemy.orm import Session
 
 from src.database import get_db
 from src.models.user import User
+from src.routers.users import get_current_user
 from src.schemas.public_image import (
-    PublicImageSubmitRequest,
-    PublicImageResponse,
-    PublicImageListResponse,
     PublicImageDetailResponse,
-    ReviewRequest,
+    PublicImageListResponse,
+    PublicImageResponse,
+    PublicImageSubmitRequest,
     RemoveRequest,
+    ReviewRequest,
     SetVisibilityRequest,
 )
 from src.services import public_service
-from src.routers.users import get_current_user
 
 router = APIRouter(prefix="/api/public/images", tags=["公共图库"])
 

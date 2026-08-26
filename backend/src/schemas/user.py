@@ -4,11 +4,11 @@ Pydantic Schema 负责校验和序列化, 时刻分清楚每个场景该用哪�
 """
 
 from datetime import datetime
-from typing import Optional
+
 from pydantic import BaseModel, EmailStr
 
 # EmailStr 来自 pydantic[email-validator] ，会自动校验邮箱格式。
-# 如果前端传了 "not-an-email" ，FastAPI 会直接返回 422 验证错误。 
+# 如果前端传了 "not-an-email" ，FastAPI 会直接返回 422 验证错误。
 # model_config = {"from_attributes": True} 是 Pydantic v2 的写法，
 # 之前的 class Config: orm_mode = True 已经废弃。
 
@@ -30,7 +30,7 @@ class UserResponse(BaseModel):
     email : str
     role : str
     uid : str
-    avatar_url : Optional[str] = None
+    avatar_url : str | None = None
     created_at : datetime
     model_config = {"from_attributes": True}
 

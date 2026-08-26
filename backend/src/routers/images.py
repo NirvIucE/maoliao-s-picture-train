@@ -5,16 +5,24 @@
 
 import os
 
-from fastapi import APIRouter, Depends, UploadFile, File, Query, Form, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from src.database import get_db
 from src.models.user import User
-from src.schemas.image import ImageResponse, ImageListResponse, ImageUploadResponse, EditImageRequest, AIEditRequest, AIEditResponse, UpdateImageNameRequest
-from src.services import image_service
 from src.routers.users import get_current_user
+from src.schemas.image import (
+    AIEditRequest,
+    AIEditResponse,
+    EditImageRequest,
+    ImageListResponse,
+    ImageResponse,
+    ImageUploadResponse,
+    UpdateImageNameRequest,
+)
+from src.services import image_service
 
 router = APIRouter(prefix="/api/images", tags = ["图片"])
 
@@ -57,7 +65,7 @@ async def list_images(
 @router.get("/{image_id}", response_model=ImageResponse)
 def get_image(
     image_id : int,
-    db : Session = Depends(get_db), 
+    db : Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """获取图片详情"""
@@ -74,7 +82,7 @@ def download_original(
     if not os.path.exists(image.file_path):
         raise HTTPException(status_code=404, detail="原始图片不存在")
     return FileResponse(
-        image.file_path, 
+        image.file_path,
         filename=image.original_name,
         media_type="application/octet-stream",
     )
@@ -82,7 +90,7 @@ def download_original(
 @router.delete("/{image_id}")
 async def delete_image(
     image_id : int,
-    db : Session = Depends(get_db), 
+    db : Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """删除图片"""
@@ -149,4 +157,4 @@ def _build_upload_response(image) -> dict:
         "height": image.height,
         "image_url": image.image_url,
         "thumbnail_url": image.thumbnail_url,
-    }    
+    }

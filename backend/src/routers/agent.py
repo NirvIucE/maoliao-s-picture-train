@@ -2,19 +2,19 @@
 Agent 路由
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 
 #StreamingResponse 是 FastAPI 内置的流式响应。
 # media_type="text/event-stream" 告诉浏览器"这是一个 SSE 流，不要一次性等结果，逐块渲染"。
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
 from src.config import MODEL_REGISTRY
-from src.routers.users import get_current_user
+from src.database import get_db
 from src.models.user import User
+from src.routers.users import get_current_user
 from src.schemas.agent import AnalyzeImageRequest, ChatRequest, ModelInfo
 from src.services import agent_service, image_service
-from sqlalchemy.orm import Session
-from src.database import get_db
 
 router = APIRouter(prefix="/api/agent", tags=["AI助手"])
 

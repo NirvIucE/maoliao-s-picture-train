@@ -8,8 +8,8 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from src.models.image import Image
-from src.models.user import User
 from src.models.public_image import PublicImage
+from src.models.user import User
 from src.services.image_service import get_image_detail
 
 

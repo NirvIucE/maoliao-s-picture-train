@@ -2,31 +2,29 @@
 业务逻辑
 上传、压缩、查询、删除
 """
-import os
-import io
-import uuid
+import asyncio
 import base64
-
-from fastapi import UploadFile, HTTPException, status
-from sqlalchemy.orm import Session
+import io
+import os
+import uuid
 
 import httpx
-
-from src.cache import cache_get, cache_set, cache_delete_pattern
-import asyncio
+from fastapi import HTTPException, UploadFile, status
 from PIL import Image as PILImage
+from sqlalchemy.orm import Session
 
+from src.cache import cache_delete_pattern, cache_get, cache_set
+from src.config import PROVIDER_CONFIG
 from src.models.image import Image
-from src.models.user import User
 from src.models.public_image import PublicImage
+from src.models.user import User
 from src.schemas.image import ImageResponse
 from src.utils.image_utils import (
-    get_image_dimensions,
     generate_thumbnail,
-    validate_image_format,
     get_date_upload_dir,
+    get_image_dimensions,
+    validate_image_format,
 )
-from src.config import PROVIDER_CONFIG
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__),"..", "uploads")
 
@@ -157,7 +155,7 @@ async def get_user_images(db: Session, user: User, skip: int = 0, limit: int = 2
             # 缓存命中：从 dict 重建 Pydantic 模型
             cached["items"] = [ImageResponse(**item) for item in cached["items"]]
             return cached
-    
+
     # 缓存未命中 查数据库
     query = db.query(Image).filter(Image.user_id == user.id)
     if search:
@@ -166,7 +164,7 @@ async def get_user_images(db: Session, user: User, skip: int = 0, limit: int = 2
             (Image.custom_name.ilike(pattern)) |
             (Image.original_name.ilike(pattern))
         )
-    
+
     total = query.count()
     images = query.order_by(Image.created_at.desc()).offset(skip).limit(limit).all()
     # ORM → Pydantic（便于 JSON 序列化存入缓存）
@@ -225,7 +223,7 @@ def edit_image(db: Session,
                 img = img.transpose(PILImage.Transpose.FLIP_TOP_BOTTOM)
         elif op.type == "crop":
             img = img.crop((op.left, op.top, op.right, op.bottom))
-        
+
     if save_mode == "overwrite":
         # 覆盖原图 + 重生成缩略图
         img.save(image.file_path)
@@ -336,7 +334,7 @@ async def edit_image_by_ai(db: Session, image_id: int, prompt: str, image_base64
     provider = PROVIDER_CONFIG.get("siliconflow")
     if not provider or not provider.get("api_key"):
         raise HTTPException(status_code=500, detail="siliconflow 未配置")
-    
+
     # 组合指令：让模型只改红色涂鸦标记区域
     full_prompt = (
         f"图中被{color_name}半透明标记覆盖的区域是唯一需要修改的目标区域。"
@@ -361,7 +359,7 @@ async def edit_image_by_ai(db: Session, image_id: int, prompt: str, image_base64
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"AI 编辑失败: {resp.status_code} - {resp.text[:200]}",
             )
-        
+
         data = resp.json()
         result_url = data["images"][0]["url"]
 

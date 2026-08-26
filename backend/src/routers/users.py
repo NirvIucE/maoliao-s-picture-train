@@ -1,20 +1,20 @@
 """
 获取当前用户（需要 JWT 鉴权）
 """
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.orm import Session
 
 from src.database import get_db
 from src.models.user import User
-from src.schemas.user import UserResponse, UpdateUsernameRequest, ChangePasswordRequest
-from src.utils.security import decode_access_token
+from src.schemas.user import ChangePasswordRequest, UpdateUsernameRequest, UserResponse
 from src.services.auth_service import (
-    get_cached_user,
-    update_username,
     change_password,
+    get_cached_user,
     update_avatar,
+    update_username,
 )
+from src.utils.security import decode_access_token
 
 router = APIRouter(prefix="/api/users", tags=["用户"])
 
@@ -75,4 +75,3 @@ async def upload_my_avatar(
     """上传头像"""
     avatar_url = update_avatar(db, current_user, file)
     return {"avatar_url": avatar_url}
-    

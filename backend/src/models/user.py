@@ -3,11 +3,11 @@
 User 表的ORM模型
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime
 
+from sqlalchemy import Column, DateTime, Integer, String
 
 from src.database import Base
-from src.models.image import Image
+
 
 class User(Base):
     __tablename__ = "users"

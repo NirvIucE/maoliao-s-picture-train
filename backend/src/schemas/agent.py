@@ -3,6 +3,7 @@ Agent Schema
 """
 from pydantic import BaseModel
 
+
 class AnalyzeImageRequest(BaseModel):
     """图片分析请求"""
     image_id: int
@@ -13,7 +14,7 @@ class ChatRequest(BaseModel):
     messages:list[dict] # [{"role": "user", "content": "..."}]
     model: str = "deepseek-chat" # 默认用文本模型
     image_id: int | None = None # 可选，关联图片
-    
+
 class ModelInfo(BaseModel):
     """模型信息"""
     id: str

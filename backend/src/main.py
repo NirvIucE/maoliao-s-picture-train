@@ -2,20 +2,20 @@
 主应用入口
 """
 
-import os
-import mimetypes
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
-
 import logging
+import mimetypes
+import os
 import time
 from contextlib import asynccontextmanager
 
-from src.database import engine, Base
-from src.routers import auth, users, images, agent, public_images
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from src.database import Base, engine
 from src.logger import setup_logging, stop_logging
+from src.routers import agent, auth, images, public_images, users
 
 # ① 初始化日志（必须在创建 app 之前，让后续启动过程也有日志）
 setup_logging()

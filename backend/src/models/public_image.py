@@ -2,7 +2,8 @@
 公共图库提交记录表模型
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 
 from src.database import Base
 

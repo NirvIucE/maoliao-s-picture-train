@@ -4,15 +4,13 @@ Agent 服务：图片分析 + 对话助手
 
 import base64
 import json
-from typing import AsyncGenerator
-import httpx
+from collections.abc import AsyncGenerator
 
+import httpx
 from fastapi import HTTPException, status
 
-from sqlalchemy.orm import Session
+from src.config import MODEL_REGISTRY, PROVIDER_CONFIG
 
-from src.config import PROVIDER_CONFIG, MODEL_REGISTRY
-from src.services import image_service
 
 def _encode_image(image_path: str) -> str:
     """读取本地图片文件并编码为 base64 字符串"""
@@ -22,9 +20,9 @@ def _encode_image(image_path: str) -> str:
 def _get_model_config(model_id: str) -> tuple[dict, dict]:
     """根据模型 ID 查找模型描述 + 厂商配置，找不到抛异常"""
     model = next((m for m in MODEL_REGISTRY if m["id"] == model_id), None)
-    if model is None: 
+    if model is None:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"不支持的模型: {model_id}，可用模型: {[m['id'] for m in MODEL_REGISTRY]}",
         )
     provider = PROVIDER_CONFIG.get(model["provider"])
@@ -108,7 +106,7 @@ async def analyze_image(image_path: str, image_mime: str, model_id: str) -> Asyn
         yield chunk
 
 async def chat(
-    messages: list[dict], 
+    messages: list[dict],
     model_id: str,
     image=None,
 ) -> AsyncGenerator[str, None]:

@@ -9,11 +9,11 @@
 - 配置全部从 .env 读取，文件大小 / 份数 / 级别 / 格式均可调
 """
 
-import os
+import atexit
 import logging
 import logging.handlers
+import os
 import queue
-import atexit
 
 from dotenv import load_dotenv
 

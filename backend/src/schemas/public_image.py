@@ -2,7 +2,8 @@
 公共图库 请求/响应 Schema
 """
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -16,15 +17,15 @@ class PublicImageResponse(BaseModel):
     id: int
     image_id: int
     user_id: int
-    username: Optional[str] = None
+    username: str | None = None
     status: str
-    review_comment: Optional[str] = None
-    reviewed_by: Optional[int] = None
-    reviewed_at: Optional[datetime] = None
+    review_comment: str | None = None
+    reviewed_by: int | None = None
+    reviewed_at: datetime | None = None
     created_at: datetime
     display_name: str
-    thumbnail_url: Optional[str] = None
-    image_url: Optional[str] = None
+    thumbnail_url: str | None = None
+    image_url: str | None = None
     is_visible: bool = True
 
 
@@ -37,12 +38,12 @@ class PublicImageListResponse(BaseModel):
 class ReviewRequest(BaseModel):
     """审核请求"""
     action: Literal["approve", "reject"]
-    comment: Optional[str] = None
+    comment: str | None = None
 
 
 class RemoveRequest(BaseModel):
     """下架请求"""
-    comment: Optional[str] = None
+    comment: str | None = None
 
 
 class PublicImageDetailResponse(PublicImageResponse):
