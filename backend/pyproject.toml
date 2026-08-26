@@ -25,3 +25,44 @@ dependencies = [
 [[tool.uv.index]]
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 default = true
+
+# ── dev 依赖组（测试 + 静态检查，不进生产）──
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+    "fakeredis>=2.20",
+    "respx>=0.21",
+    "ruff>=0.6",
+    "mypy>=1.10",
+]
+
+# ── ruff 配置（lint + format）──
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E=pycodestyle错误 F=pyflakes I=isort W=pycodestyle警告 UP=pyupgrade
+select = ["E", "F", "I", "W", "UP"]
+
+[tool.ruff.format]
+# 默认风格即 black 兼容，无需额外配置
+
+# ── mypy 配置 ──
+[tool.mypy]
+python_version = "3.12"
+# SQLAlchemy/FastAPI/redis 等库存根不全，忽略缺失存根避免误报
+ignore_missing_imports = true
+warn_return_any = true
+warn_unused_configs = true
+# 只检查 src/，tests/ 暂不强制类型（学习阶段放宽）
+files = ["src"]
+plugins = ["sqlalchemy.ext.mypy.plugin"]
+
+# ── pytest 配置（顺手加上，后面接口测试要用）──
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
