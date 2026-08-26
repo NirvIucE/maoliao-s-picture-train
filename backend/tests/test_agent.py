@@ -1,17 +1,17 @@
-"""agent 模块接口测试：模型列表 / 对话 / 图片分析（见计划 3.1 节）
+"""
+agent 模块接口测试：模型列表 / 对话 / 图片分析（见计划 3.1 节）
 
 状态码依据实际路由 + agent_service：
 - /models 公开 200，返回模型列表
 - /chat：成功 200（SSE 流），text 模型 + image_id 400，不存在图 404，无 token 401
 - /analyze-image：成功 200（SSE 流），不存在图 404，无 token 401
 - respx mock httpx，不烧 API 额度
+- mock_models fixture 已移至 conftest.py 共享
 """
 
 import httpx
 import pytest
 import respx
-
-from src.services import agent_service
 
 # mock httpx 返回的 SSE 响应（OpenAI 格式 chunk + [DONE]）
 SSE_RESPONSE = (
@@ -19,25 +19,6 @@ SSE_RESPONSE = (
     'data: {"choices":[{"delta":{"content":"世界"}}]}\n\n'
     'data: [DONE]\n\n'
 )
-
-
-@pytest.fixture
-def mock_models(monkeypatch):
-    """注入 mock 模型注册表 + 厂商配置（避免依赖 .env 的 AI_MODELS）"""
-    fake_registry = [
-        {"id": "text-model", "name": "文本模型", "type": "text", "provider": "deepseek"},
-        {"id": "vision-model", "name": "视觉模型", "type": "vision", "provider": "siliconflow"},
-    ]
-    fake_providers = {
-        "deepseek": {"api_key": "fake-key", "base_url": "https://api.deepseek.com/v1"},
-        "siliconflow": {"api_key": "fake-key", "base_url": "https://api.siliconflow.cn/v1"},
-    }
-    from src.routers import agent as agent_router
-
-    monkeypatch.setattr(agent_router, "MODEL_REGISTRY", fake_registry)
-    monkeypatch.setattr(agent_service, "MODEL_REGISTRY", fake_registry)
-    monkeypatch.setattr(agent_service, "PROVIDER_CONFIG", fake_providers)
-    return fake_registry
 
 
 class TestModels:

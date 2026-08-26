@@ -180,3 +180,23 @@ def test_image(client, auth_headers):
     )
     assert r.status_code == 200, f"上传失败: {r.text}"
     return r.json()["id"]
+
+
+@pytest.fixture
+def mock_models(monkeypatch):
+    """注入 mock 模型注册表 + 厂商配置（避免依赖 .env 的 AI_MODELS）"""
+    fake_registry = [
+        {"id": "text-model", "name": "文本模型", "type": "text", "provider": "deepseek"},
+        {"id": "vision-model", "name": "视觉模型", "type": "vision", "provider": "siliconflow"},
+    ]
+    fake_providers = {
+        "deepseek": {"api_key": "fake-key", "base_url": "https://api.deepseek.com/v1"},
+        "siliconflow": {"api_key": "fake-key", "base_url": "https://api.siliconflow.cn/v1"},
+    }
+    from src.routers import agent as agent_router
+    from src.services import agent_service
+
+    monkeypatch.setattr(agent_router, "MODEL_REGISTRY", fake_registry)
+    monkeypatch.setattr(agent_service, "MODEL_REGISTRY", fake_registry)
+    monkeypatch.setattr(agent_service, "PROVIDER_CONFIG", fake_providers)
+    return fake_registry
