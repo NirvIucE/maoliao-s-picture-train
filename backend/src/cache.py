@@ -117,7 +117,7 @@ async def cache_set(key: str, value: Any, ttl: int = 300) -> None:
         return
     try:
         r = await get_redis()
-        await r.setex(_cache_key(key), ttl, json.dumps(value, ensure_ascii=False, default=str))
+        await r.set(_cache_key(key), json.dumps(value, ensure_ascii=False, default=str), ex=ttl)
     except RedisError:
         pass
 
