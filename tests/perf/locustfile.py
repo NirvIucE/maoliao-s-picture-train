@@ -78,8 +78,8 @@ class WebsiteUser(HttpUser):
 
     @task(2)
     def public_gallery(self):
-        """公共图库（角色感知查询，无需 token）"""
-        self.client.get("/api/public/images", name="/api/public/images")
+        """公共图库（角色感知查询，需登录）"""
+        self.client.get("/api/public/images", headers=self.headers, name="/api/public/images")
 
     @task(1)
     def login(self):
