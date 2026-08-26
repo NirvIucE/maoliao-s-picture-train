@@ -1,14 +1,14 @@
-
 """
 图片表模型
 """
 import os
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
+
 from src.database import Base
-from src.models import tag  # 确保 Tag 模型和 image_tags 表被注册到 Base.metadata
+from src.models.tag import image_tags
 
 class Image(Base):
     __tablename__ = "images"
@@ -29,7 +29,7 @@ class Image(Base):
 
     # ORM 关系
     user = relationship("User", back_populates="images")
-    tags = relationship("Tag", secondary="image_tags", back_populates="images")
+    tags = relationship("Tag", secondary=image_tags, back_populates="images")
 
     # 计算属性：Pydantic from_attributes 可读取 @property
     @property
@@ -41,7 +41,7 @@ class Image(Base):
     def image_url(self) -> str | None:
         if self.file_path:
             return f"/static/uploads/{self.date_dir}/{self.filename}"
-        return None        
+        return None
 
     @property
     def thumbnail_url(self) -> str | None:
