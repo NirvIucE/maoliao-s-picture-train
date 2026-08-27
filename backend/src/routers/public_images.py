@@ -1,12 +1,15 @@
 """
 公共图库路由
 """
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from src.database import get_db
 from src.models.user import User
-from src.routers.users import get_current_user
+from src.routers.users import get_current_user, get_current_user_optional
 from src.schemas.public_image import (
     PublicImageDetailResponse,
     PublicImageListResponse,
@@ -43,9 +46,9 @@ async def list_public(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
-    """浏览公共图库（角色感知过滤）"""
+    """浏览公共图库（匿名看 approved+visible，登录后角色感知过滤）"""
     return public_service.get_public_images(db, current_user, skip, limit)
 
 
@@ -99,10 +102,33 @@ async def remove(
 async def detail(
     public_id: int,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+):
+    """公共图库图片详情（含当前用户权限判断，匿名可访问 approved+visible）"""
+    return public_service.get_public_detail(db, public_id, current_user)
+
+
+@router.get("/{public_id}/download")
+def download_public_image(
+    public_id: int,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """公共图库图片详情（含当前用户权限判断）"""
-    return public_service.get_public_detail(db, public_id, current_user)
+    """下载公共图库图片（需登录）"""
+    pi = public_service._get_public_record(db, public_id)
+    if pi.status != "approved" or not pi.is_visible:
+        raise HTTPException(status_code=404, detail="图片不存在或不可见")
+    from src.models.image import Image
+    image = db.query(Image).filter(Image.id == pi.image_id).first()
+    if not image:
+        raise HTTPException(status_code=404, detail="原图不存在")
+    if not os.path.exists(image.file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(
+        image.file_path,
+        filename=image.original_name,
+        media_type="application/octet-stream",
+    )
 
 
 @router.post("/{public_id}/visibility")

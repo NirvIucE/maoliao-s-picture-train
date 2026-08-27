@@ -51,21 +51,26 @@ def submit_to_public(db: Session, image_id: int, user: User) -> dict:
     return _build_item(pi, image, user)
 
 
-def get_public_images(db: Session, user: User, skip: int = 0, limit: int = 20) -> dict:
-    """浏览公共图库（管理员看全部 approved；普通用户看可见 + 自己上传的全部）"""
+def get_public_images(db: Session, user: User | None, skip: int = 0, limit: int = 20) -> dict:
+    """浏览公共图库（匿名看 approved+visible；管理员看全部 approved；普通用户看 visible + 自己上传的）"""
     query = (
         db.query(PublicImage, Image, User)
         .join(Image, PublicImage.image_id == Image.id)
         .join(User, PublicImage.user_id == User.id)
         .filter(PublicImage.status == "approved")
     )
-    if user.role != "admin":
+    if user is None:
+        # 匿名用户：只看 approved + visible
+        query = query.filter(PublicImage.is_visible == True)  # noqa: E712
+    elif user.role != "admin":
+        # 普通用户：看 visible + 自己上传的
         query = query.filter(
             or_(
                 PublicImage.is_visible == True,  # noqa: E712
                 PublicImage.user_id == user.id,
             )
         )
+    # admin: 看全部 approved（不加额外过滤）
     total = query.count()
     rows = query.order_by(PublicImage.created_at.desc()).offset(skip).limit(limit).all()
     items = [_build_item(pi, img, u) for pi, img, u in rows]
@@ -140,14 +145,21 @@ def delete_public_image(db: Session, public_id: int, user: User) -> None:
     db.commit()
 
 
-def get_public_detail(db: Session, public_id: int, user: User) -> dict:
-    """公共图库详情（含当前用户是否为上传者/管理员）"""
+def get_public_detail(db: Session, public_id: int, user: User | None) -> dict:
+    """公共图库详情（含当前用户是否为上传者/管理员，匿名可访问 approved+visible）"""
     pi = _get_public_record(db, public_id)
+    # 匿名用户只能看 approved + visible
+    if user is None and (pi.status != "approved" or not pi.is_visible):
+        raise HTTPException(status_code=404, detail="记录不存在")
     image = db.query(Image).filter(Image.id == pi.image_id).first()
     submitter = db.query(User).filter(User.id == pi.user_id).first()
     item = _build_item(pi, image, submitter)
-    item["is_owner"] = pi.user_id == user.id
-    item["is_admin"] = user.role == "admin"
+    if user is None:
+        item["is_owner"] = False
+        item["is_admin"] = False
+    else:
+        item["is_owner"] = pi.user_id == user.id
+        item["is_admin"] = user.role == "admin"
     return item
 
 

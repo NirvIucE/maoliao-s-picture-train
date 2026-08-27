@@ -227,3 +227,55 @@ class TestDelete:
         """bob 删 alice 的记录 → 403"""
         r = client.delete(f"/api/public/images/{approved_public_id}", headers=other_user_headers)
         assert r.status_code == 403
+
+
+class TestAnonymous:
+    """匿名用户（未登录）访问公共图库"""
+
+    def test_anonymous_can_list_approved(self, client, approved_public_id):
+        """匿名用户能看 approved+visible 列表 → 200 + total >= 1"""
+        r = client.get("/api/public/images")
+        assert r.status_code == 200
+        assert r.json()["total"] >= 1
+        # 返回的条目都是 approved + visible
+        for item in r.json()["items"]:
+            assert item["status"] == "approved"
+            assert item["is_visible"] is True
+
+    def test_anonymous_can_view_detail(self, client, approved_public_id):
+        """匿名用户能看 approved+visible 详情 → 200 + is_owner=False + is_admin=False"""
+        r = client.get(f"/api/public/images/{approved_public_id}")
+        assert r.status_code == 200
+        assert r.json()["is_owner"] is False
+        assert r.json()["is_admin"] is False
+
+    def test_anonymous_cannot_download(self, client, approved_public_id):
+        """匿名用户不能下载 → 401"""
+        r = client.get(f"/api/public/images/{approved_public_id}/download")
+        assert r.status_code == 401
+
+    def test_logged_in_can_download(self, client, auth_headers, approved_public_id):
+        """登录用户能下载 → 200 + 文件流"""
+        r = client.get(f"/api/public/images/{approved_public_id}/download", headers=auth_headers)
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/octet-stream"
+        assert len(r.content) > 0  # 有文件内容
+
+    def test_anonymous_cannot_see_hidden(self, client, auth_headers, admin_headers, pending_public_id):
+        """匿名用户看不到 is_visible=False 的图（先 approve 再隐藏）"""
+        # admin 审核通过
+        client.post(
+            f"/api/public/images/{pending_public_id}/review",
+            headers=admin_headers,
+            json={"action": "approve"},
+        )
+        # owner 隐藏
+        client.post(
+            f"/api/public/images/{pending_public_id}/visibility",
+            headers=auth_headers,
+            json={"visible": False},
+        )
+        # 匿名列表里看不到
+        r = client.get("/api/public/images")
+        ids = [item["id"] for item in r.json()["items"]]
+        assert pending_public_id not in ids

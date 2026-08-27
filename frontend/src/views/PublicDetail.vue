@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { getPublicDetail, deletePublicImage, setPublicVisibility, type PublicImageDetail } from "@/api/public"
+import { getPublicDetail, deletePublicImage, setPublicVisibility, downloadPublicImage, type PublicImageDetail } from "@/api/public"
+import { useAuthStore } from "@/stores/auth"
 
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 
 const detail = ref<PublicImageDetail | null>(null)
 const loading = ref(false)
 const acting = ref(false)
+const downloading = ref(false)
 
 const canOperate = computed(() => !!detail.value && (detail.value.is_owner || detail.value.is_admin))
 
@@ -51,6 +54,18 @@ async function handleDelete() {
   }
 }
 
+async function handleDownload() {
+  if (!detail.value || !auth.isLoggedIn) return
+  downloading.value = true
+  try {
+    await downloadPublicImage(detail.value.id, detail.value.display_name, detail.value.image_url || "")
+  } catch (error: any) {
+    alert(error.response?.data?.detail || "下载失败")
+  } finally {
+    downloading.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -68,6 +83,15 @@ onMounted(load)
           <span class="dot">·</span>
           可见性：{{ detail.is_visible ? "普通用户可见" : "已隐藏" }}
         </p>
+        <div class="download-section">
+          <button v-if="auth.isLoggedIn" class="btn-download" :disabled="downloading" @click="handleDownload">
+            {{ downloading ? "下载中..." : "下载图片" }}
+          </button>
+          <div v-else class="download-locked">
+            <button class="btn-download" disabled>下载图片</button>
+            <span class="hint">登陆后可下载图片</span>
+          </div>
+        </div>
         <div v-if="canOperate" class="ops">
           <button class="btn-toggle" :disabled="acting" @click="handleToggleVisibility">
             {{ detail.is_visible ? "设为普通用户不可见" : "设为普通用户可见" }}
@@ -116,4 +140,16 @@ onMounted(load)
   cursor: pointer;
 }
 .btn-toggle:disabled, .btn-delete:disabled { opacity: 0.5; cursor: not-allowed; }
+.download-section { margin: 16px 0; }
+.btn-download {
+  padding: 8px 16px;
+  background: #67c23a;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-download:disabled { opacity: 0.5; cursor: not-allowed; }
+.download-locked { display: flex; align-items: center; gap: 12px; }
+.download-locked .hint { color: #e6a23c; font-size: 14px; }
 </style>

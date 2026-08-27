@@ -11,12 +11,12 @@ const auth = useAuthStore()
     <nav class="navbar">
         <div class="nav-left">
             <router-link to="/" class="logo">猫里奥云图库</router-link>
+            <router-link to="/public">公共图库</router-link>
         </div>
         <div class="nav-right">
             <template v-if="auth.isLoggedIn">
                 <router-link to="/upload">上传</router-link>
                 <router-link to="/gallery">我的图库</router-link>
-                <router-link to="/public">公共图库</router-link>
                 <router-link to="/agent">AI助手</router-link>
                 <router-link v-if="auth.user?.role === 'admin'" to="/admin/review">审核</router-link>
                 <router-link to="/profile" class="username">
@@ -26,8 +26,7 @@ const auth = useAuthStore()
                 <button @click="auth.logout(); router.push('/login')">登出</button>
             </template>
             <template v-else>
-                <router-link to="/login">登录</router-link>
-                <router-link to="/register">注册</router-link>
+                <router-link to="/profile">个人信息</router-link>
             </template>
         </div>
     </nav>
@@ -42,11 +41,23 @@ const auth = useAuthStore()
   background: #fff;
   border-bottom: 1px solid #e4e7ed;
 }
+.nav-left {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
 .nav-left .logo {
   font-size: 18px;
   font-weight: bold;
   color: #409eff;
   text-decoration: none;
+}
+.nav-left a:not(.logo) {
+  color: #606266;
+  text-decoration: none;
+}
+.nav-left a:not(.logo):hover {
+  color: #409eff;
 }
 .nav-right {
   display: flex;

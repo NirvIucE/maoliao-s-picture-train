@@ -1,3 +1,11 @@
+/*
+ * @Author: NirvIucE 1750682685@qq.com
+ * @Date: 2026-08-20 20:22:37
+ * @LastEditors: NirvIucE 1750682685@qq.com
+ * @LastEditTime: 2026-08-27 14:54:17
+ * @FilePath: \new-picture-train\frontend\src\api\public.ts
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+ */
 
 import api from "./client"
 
@@ -70,4 +78,19 @@ export function getPublicDetail(publicId: number): Promise<PublicImageDetail> {
 // 切换可见性
 export function setPublicVisibility(publicId: number, visible: boolean): Promise<{ message: string }> {
     return api.post(`/public/images/${publicId}/visibility`, { visible })
+}
+
+// 下载公共图库图片（需登录）
+export async function downloadPublicImage(publicId: number, displayName: string, imageUrl: string): Promise<void> {
+    const blob = await api.get<Blob>(`/public/images/${publicId}/download`, { responseType: "blob" })
+    // 从 imageUrl 提取扩展名，拼到下载文件名后
+    const ext = imageUrl.match(/\.(jpg|jpeg|png|gif|bmp|webp|tiff)$/i)?.[0] || ""
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = displayName + ext || "download" + ext
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
 }
