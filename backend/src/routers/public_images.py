@@ -45,11 +45,12 @@ async def submit(
 async def list_public(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
+    search: str | None = Query(None, description="按图片名称搜索"),
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ):
-    """浏览公共图库（匿名看 approved+visible，登录后角色感知过滤）"""
-    return public_service.get_public_images(db, current_user, skip, limit)
+    """浏览公共图库（匿名看 approved+visible，登录后角色感知过滤，支持按名称搜索）"""
+    return public_service.get_public_images(db, current_user, skip, limit, search)
 
 
 @router.get("/my", response_model=PublicImageListResponse)

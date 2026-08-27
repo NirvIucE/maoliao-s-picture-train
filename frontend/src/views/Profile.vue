@@ -17,6 +17,9 @@ const newPassword = ref("")
 const confirmPassword = ref("")
 const saving = ref(false)
 const avatarFile = ref<File | null>(null)
+const avatarPreview = ref("")
+const successMsg = ref("")
+const errorMsg = ref("")
 
 const statusText: Record<string, string> = {
   pending: "待审核",
@@ -36,7 +39,7 @@ async function load() {
     items.value = res.items
     total.value = res.total
   } catch (error: any) {
-    alert(error.response?.data?.detail || "加载失败")
+    errorMsg.value = error.response?.data?.detail || "加载失败"
   } finally {
     loading.value = false
   }
@@ -48,9 +51,10 @@ async function handleDelete(item: PublicImageItem) {
   deleting.value[item.id] = true
   try {
     await deletePublicImage(item.id)
+    successMsg.value = `${action}成功`
     await load()
   } catch (error: any) {
-    alert(error.response?.data?.detail || `${action}失败`)
+    errorMsg.value = error.response?.data?.detail || `${action}失败`
   } finally {
     delete deleting.value[item.id]
   }
@@ -58,22 +62,31 @@ async function handleDelete(item: PublicImageItem) {
 
 function onAvatarChange(e: Event) {
   const input = e.target as HTMLInputElement
-  avatarFile.value = input.files?.[0] || null
+  const file = input.files?.[0] || null
+  avatarFile.value = file
+  if (file) {
+    avatarPreview.value = URL.createObjectURL(file)
+  } else {
+    avatarPreview.value = ""
+  }
 }
 
 async function handleUploadAvatar() {
   if (!avatarFile.value) {
-    alert("请先选择图片")
+    errorMsg.value = "请先选择图片"
     return
   }
   saving.value = true
+  successMsg.value = ""
+  errorMsg.value = ""
   try {
     await uploadAvatar(avatarFile.value)
     await auth.fetchUser()
     avatarFile.value = null
-    alert("头像已更新")
+    avatarPreview.value = ""
+    successMsg.value = "头像已更新"
   } catch (error: any) {
-    alert(error.response?.data?.detail || "上传失败")
+    errorMsg.value = error.response?.data?.detail || "上传失败"
   } finally {
     saving.value = false
   }
@@ -82,17 +95,19 @@ async function handleUploadAvatar() {
 async function handleUpdateUsername() {
   const name = usernameInput.value.trim()
   if (!name) {
-    alert("请输入新用户名")
+    errorMsg.value = "请输入新用户名"
     return
   }
   saving.value = true
+  successMsg.value = ""
+  errorMsg.value = ""
   try {
     await updateUsername(name)
     await auth.fetchUser()
     usernameInput.value = ""
-    alert("用户名已更新")
+    successMsg.value = "用户名已更新"
   } catch (error: any) {
-    alert(error.response?.data?.detail || "更新失败")
+    errorMsg.value = error.response?.data?.detail || "更新失败"
   } finally {
     saving.value = false
   }
@@ -100,18 +115,20 @@ async function handleUpdateUsername() {
 
 async function handleChangePassword() {
   if (newPassword.value !== confirmPassword.value) {
-    alert("两次输入的新密码不一致")
+    errorMsg.value = "两次输入的新密码不一致"
     return
   }
   saving.value = true
+  successMsg.value = ""
+  errorMsg.value = ""
   try {
     await changePassword(oldPassword.value, newPassword.value)
     oldPassword.value = ""
     newPassword.value = ""
     confirmPassword.value = ""
-    alert("密码已更新")
+    successMsg.value = "密码已更新"
   } catch (error: any) {
-    alert(error.response?.data?.detail || "修改失败")
+    errorMsg.value = error.response?.data?.detail || "修改失败"
   } finally {
     saving.value = false
   }
@@ -123,6 +140,8 @@ onMounted(load)
 <template>
   <div class="profile">
     <h2>个人主页</h2>
+    <p v-if="successMsg" class="success-msg">{{ successMsg }}</p>
+    <p v-if="errorMsg" class="error-msg">{{ errorMsg }}</p>
     <p class="welcome">你好，{{ auth.user?.username }}</p>
     <p v-if="auth.user?.uid" class="uid">专属 UID：{{ auth.user.uid }}</p>
 
@@ -132,7 +151,8 @@ onMounted(load)
       <div class="edit-row">
         <span class="label">头像</span>
         <div class="avatar-box">
-          <img v-if="auth.user?.avatar_url" :src="auth.user.avatar_url" class="avatar" alt="头像" />
+          <img v-if="avatarPreview" :src="avatarPreview" class="avatar" alt="预览" />
+          <img v-else-if="auth.user?.avatar_url" :src="auth.user.avatar_url" class="avatar" alt="头像" />
           <div v-else class="avatar placeholder">无</div>
         </div>
         <input type="file" accept="image/*" @change="onAvatarChange" />
@@ -212,6 +232,8 @@ onMounted(load)
 
 <style scoped>
 .profile { padding: 20px 0; }
+.success-msg { color: #67c23a; margin-bottom: 12px; }
+.error-msg { color: #f56c6c; margin-bottom: 12px; }
 .welcome { color: #909399; }
 .uid { color: #909399; font-size: 13px; }
 h3 { margin-top: 24px; }

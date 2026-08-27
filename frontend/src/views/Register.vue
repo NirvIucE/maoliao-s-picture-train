@@ -14,6 +14,22 @@ const errorMsg = ref("")
 const successMsg = ref("")
 const loading = ref(false)
 
+const passwordStrength = ref(0)  // 0=空, 1=弱, 2=中, 3=强
+const strengthText = ["", "弱", "中", "强"]
+const strengthColor = ["", "#f56c6c", "#e6a23c", "#67c23a"]
+
+function checkStrength() {
+    const p = password.value
+    if (!p) { passwordStrength.value = 0; return }
+    let types = 0
+    if (/[a-z]/.test(p)) types++
+    if (/[A-Z]/.test(p) || /[0-9]/.test(p)) types++
+    if (/[^a-zA-Z0-9]/.test(p)) types++
+    if (p.length < 6 || types < 2) passwordStrength.value = 1
+    else if (p.length < 8 || types < 3) passwordStrength.value = 2
+    else passwordStrength.value = 3
+}
+
 async function handleRegister(){
     errorMsg.value = ""
     successMsg.value = ""
@@ -44,7 +60,17 @@ async function handleRegister(){
             </div>
             <div class="form-group">
                 <label>密码</label>
-                <input v-model="password" type="password" required />
+                <input v-model="password" type="password" required @input="checkStrength" />
+                <div v-if="passwordStrength" class="strength">
+                    <div class="strength-bar">
+                        <span v-for="n in 3" :key="n" class="strength-dot"
+                            :style="{ background: n <= passwordStrength ? strengthColor[passwordStrength] : '#e4e7ed' }">
+                        </span>
+                    </div>
+                    <span class="strength-text" :style="{ color: strengthColor[passwordStrength] }">
+                        {{ strengthText[passwordStrength] }}
+                    </span>
+                </div>
             </div>
             <p v-if="errorMsg" class="error">{{ errorMsg }}</p>
             <p v-if="successMsg" class="success">{{ successMsg }}</p>
@@ -66,6 +92,10 @@ async function handleRegister(){
     button { width: 100%; padding: 10px; background: #67c23a; color: white; border: none; border-radius: 4px; cursor: pointer; }
     button:disabled { background: #b3e19d; cursor: not-allowed; }
     .error { color: #f56c6c; margin-bottom: 12px; }
+    .strength { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+    .strength-bar { display: flex; gap: 4px; }
+    .strength-dot { width: 20px; height: 4px; border-radius: 2px; display: inline-block; }
+    .strength-text { font-size: 12px; }
     .success { color: #67c23a; margin-bottom: 12px; }
     .link { text-align: center; margin-top: 16px; }
 </style>

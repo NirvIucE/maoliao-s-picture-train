@@ -1,9 +1,10 @@
 <!-- 登录页 -->
 <script setup lang="ts">
 import { ref } from "vue"
-import { useRouter } from "vue-router"
+import { useRoute, useRouter } from "vue-router"
 import { useAuthStore } from "@/stores/auth"
 
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
@@ -17,7 +18,8 @@ async function handleLogin() {
     loading.value = true
     try {
         await auth.login(username.value, password.value)
-        router.push("/gallery")
+        const redirect = (route.query.redirect as string) || "/gallery"
+        router.push(redirect)
     } catch (err: any) {
         errorMsg.value = err.response?.data?.detail || "登录失败"
     } finally {

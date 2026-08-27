@@ -35,9 +35,9 @@ export function submitToPublic(imageId: number): Promise<PublicImageItem> {
     return api.post("/public/images", { image_id: imageId })
 }
 
-// 浏览公共图库（仅审核通过的图片）
-export function getPublicImages(skip = 0, limit = 20): Promise<PublicImageListResponse> {
-    return api.get("/public/images", { params: { skip, limit } })
+// 浏览公共图库（仅审核通过的图片，支持按名称搜索）
+export function getPublicImages(skip = 0, limit = 20, search?: string): Promise<PublicImageListResponse> {
+    return api.get("/public/images", { params: { skip, limit, search } })
 }
 
 // 我的提交记录（含各状态）

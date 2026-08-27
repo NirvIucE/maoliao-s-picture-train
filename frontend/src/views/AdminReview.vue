@@ -7,15 +7,18 @@ const loading = ref(false)
 const total = ref(0)
 const comments = ref<Record<number, string>>({})
 const actionLoading = ref<Record<number, boolean>>({})
+const successMsg = ref("")
+const errorMsg = ref("")
 
 async function load() {
   loading.value = true
+  errorMsg.value = ""
   try {
     const res = await getPendingPublicImages(0, 50)
     items.value = res.items
     total.value = res.total
   } catch (error: any) {
-    alert(error.response?.data?.detail || "加载失败")
+    errorMsg.value = error.response?.data?.detail || "加载失败"
   } finally {
     loading.value = false
   }
@@ -23,11 +26,14 @@ async function load() {
 
 async function handleReview(item: PublicImageItem, action: "approve" | "reject") {
   actionLoading.value[item.id] = true
+  successMsg.value = ""
+  errorMsg.value = ""
   try {
     await reviewPublicImage(item.id, action, comments.value[item.id] || undefined)
+    successMsg.value = action === "approve" ? "已通过审核" : "已驳回"
     await load()
   } catch (error: any) {
-    alert(error.response?.data?.detail || "操作失败")
+    errorMsg.value = error.response?.data?.detail || "操作失败"
   } finally {
     delete actionLoading.value[item.id]
   }
@@ -40,6 +46,8 @@ onMounted(load)
   <div class="admin-review">
     <h2>待审核图片</h2>
 
+    <p v-if="successMsg" class="success">{{ successMsg }}</p>
+    <p v-if="errorMsg" class="error">{{ errorMsg }}</p>
     <p v-if="loading">加载中...</p>
     <p v-else-if="items.length === 0">暂无待审核图片</p>
     <div v-else class="list">
@@ -82,6 +90,8 @@ onMounted(load)
 
 <style scoped>
 .admin-review { padding: 20px 0; }
+.success { color: #67c23a; margin-bottom: 12px; }
+.error { color: #f56c6c; margin-bottom: 12px; }
 .list { display: flex; flex-direction: column; gap: 16px; }
 .item {
   display: flex;

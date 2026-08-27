@@ -51,8 +51,8 @@ def submit_to_public(db: Session, image_id: int, user: User) -> dict:
     return _build_item(pi, image, user)
 
 
-def get_public_images(db: Session, user: User | None, skip: int = 0, limit: int = 20) -> dict:
-    """浏览公共图库（匿名看 approved+visible；管理员看全部 approved；普通用户看 visible + 自己上传的）"""
+def get_public_images(db: Session, user: User | None, skip: int = 0, limit: int = 20, search: str | None = None) -> dict:
+    """浏览公共图库（匿名看 approved+visible；管理员看全部 approved；普通用户看 visible + 自己上传的，支持按名称搜索）"""
     query = (
         db.query(PublicImage, Image, User)
         .join(Image, PublicImage.image_id == Image.id)
@@ -71,6 +71,14 @@ def get_public_images(db: Session, user: User | None, skip: int = 0, limit: int 
             )
         )
     # admin: 看全部 approved（不加额外过滤）
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(
+            or_(
+                Image.custom_name.ilike(pattern),
+                Image.original_name.ilike(pattern),
+            )
+        )
     total = query.count()
     rows = query.order_by(PublicImage.created_at.desc()).offset(skip).limit(limit).all()
     items = [_build_item(pi, img, u) for pi, img, u in rows]
