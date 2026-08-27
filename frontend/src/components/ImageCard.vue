@@ -12,6 +12,9 @@ const emit = defineEmits<{ deleted: [] }>()
 const router = useRouter()
 const showConfirm = ref(false)
 const deleting = ref(false)
+// 提交公共库反馈消息（替代 alert）
+const submitMsg = ref("")
+const submitError = ref(false)
 
 async function handleDelete() {
   deleting.value = true
@@ -29,11 +32,14 @@ async function handleDownload() {
 }
 
 async function handleSubmitPublic() {
+  submitMsg.value = ""
+  submitError.value = false
   try {
     await submitToPublic(props.image.id)
-    alert("已提交到公共图库，等待审核")
+    submitMsg.value = "已提交到公共图库，等待审核"
   } catch (error: any) {
-    alert(error.response?.data?.detail || "提交失败")
+    submitMsg.value = error.response?.data?.detail || "提交失败"
+    submitError.value = true
   }
 }
 
@@ -72,6 +78,7 @@ function goDetail() {
                 <button class="btn-no" @click="showConfirm = false">否</button>
               </div>
             </div>
+            <p v-if="submitMsg" class="submit-msg" :class="{ error: submitError }">{{ submitMsg }}</p>
         </div>
     </div>
 </template>
@@ -155,4 +162,6 @@ function goDetail() {
 }
 .btn-yes { padding: 3px 10px; background: #f56c6c; color: white; border: none; border-radius: 4px; cursor: pointer; }
 .btn-no  { padding: 3px 10px; background: #e4e7ed; border: none; border-radius: 4px; cursor: pointer; }
+.submit-msg { margin: 8px 0 0; font-size: 12px; color: #67c23a; }
+.submit-msg.error { color: #f56c6c; }
 </style>

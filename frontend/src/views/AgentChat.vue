@@ -28,6 +28,8 @@ const attachedImage = ref<{
   display_name: string
 } | null>(null)
 const uploadLoading = ref(false)
+// 上传失败反馈消息（替代 alert）
+const errorMsg = ref("")
 let previousModel = "" // 记住上传前选择的模型 
 
 const galleryVisible = ref(false) //图库弹窗显隐
@@ -58,6 +60,7 @@ async function handleFileSelected(event: Event) {
   if(!file) return
 
   uploadLoading.value = true
+  errorMsg.value = ""
   try {
     const result = await uploadImage(file)
     attachedImage.value = {
@@ -73,7 +76,7 @@ async function handleFileSelected(event: Event) {
     }
   }
   catch (err : any){
-    alert(err.response?.data?.detail || "上传失败")
+    errorMsg.value = err.response?.data?.detail || "上传失败"
   }
   finally {
     uploadLoading.value = false
@@ -207,6 +210,7 @@ function clearChat() {
       @change="handleFileSelected"
     />
     <div class="chat-input-area">
+      <p v-if="errorMsg" class="error-msg">{{ errorMsg }}</p>
       <!-- 附件预览条 -->
       <div v-if="attachedImage" class="image-preview">
         <img :src="attachedImage.thumbnail_url" />
@@ -316,6 +320,7 @@ function clearChat() {
 .chat-input-area {
   border-top: 1px solid #e4e7ed;
 }
+.error-msg { color: #f56c6c; margin: 8px 0 0; }
 .image-preview {
   display: flex;
   align-items: center;

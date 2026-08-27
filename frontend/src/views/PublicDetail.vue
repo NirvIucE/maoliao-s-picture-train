@@ -12,15 +12,20 @@ const detail = ref<PublicImageDetail | null>(null)
 const loading = ref(false)
 const acting = ref(false)
 const downloading = ref(false)
+// 内联消息（与 C1/C2 阶段风格一致，替代 alert）
+const successMsg = ref("")
+const errorMsg = ref("")
 
 const canOperate = computed(() => !!detail.value && (detail.value.is_owner || detail.value.is_admin))
 
 async function load() {
   loading.value = true
+  successMsg.value = ""
+  errorMsg.value = ""
   try {
     detail.value = await getPublicDetail(Number(route.params.id))
   } catch (error: any) {
-    alert(error.response?.data?.detail || "加载失败")
+    errorMsg.value = error.response?.data?.detail || "加载失败"
   } finally {
     loading.value = false
   }
@@ -29,11 +34,15 @@ async function load() {
 async function handleToggleVisibility() {
   if (!detail.value) return
   acting.value = true
+  successMsg.value = ""
+  errorMsg.value = ""
   try {
     await setPublicVisibility(detail.value.id, !detail.value.is_visible)
     await load()
+    // 在 load 清空消息之后设置成功提示（is_visible 已是切换后的新值）
+    successMsg.value = detail.value.is_visible ? "已设为普通用户可见" : "已设为普通用户不可见"
   } catch (error: any) {
-    alert(error.response?.data?.detail || "操作失败")
+    errorMsg.value = error.response?.data?.detail || "操作失败"
   } finally {
     acting.value = false
   }
@@ -43,12 +52,14 @@ async function handleDelete() {
   if (!detail.value) return
   if (!confirm("确定从公共图库删除该图片吗？")) return
   acting.value = true
+  successMsg.value = ""
+  errorMsg.value = ""
   try {
     await deletePublicImage(detail.value.id)
-    alert("已删除")
+    successMsg.value = "已删除"
     router.push("/public")
   } catch (error: any) {
-    alert(error.response?.data?.detail || "删除失败")
+    errorMsg.value = error.response?.data?.detail || "删除失败"
   } finally {
     acting.value = false
   }
@@ -57,10 +68,12 @@ async function handleDelete() {
 async function handleDownload() {
   if (!detail.value || !auth.isLoggedIn) return
   downloading.value = true
+  successMsg.value = ""
+  errorMsg.value = ""
   try {
     await downloadPublicImage(detail.value.id, detail.value.display_name, detail.value.image_url || "")
   } catch (error: any) {
-    alert(error.response?.data?.detail || "下载失败")
+    errorMsg.value = error.response?.data?.detail || "下载失败"
   } finally {
     downloading.value = false
   }
@@ -71,6 +84,8 @@ onMounted(load)
 
 <template>
   <div class="public-detail">
+    <p v-if="successMsg" class="success-msg">{{ successMsg }}</p>
+    <p v-if="errorMsg" class="error-msg">{{ errorMsg }}</p>
     <p v-if="loading">加载中...</p>
     <template v-else-if="detail">
       <div class="image-wrap">
@@ -107,6 +122,8 @@ onMounted(load)
 
 <style scoped>
 .public-detail { padding: 20px 0; }
+.success-msg { color: #67c23a; margin-bottom: 12px; }
+.error-msg { color: #f56c6c; margin-bottom: 12px; }
 .image-wrap {
   max-width: 800px;
   border: 1px solid #e4e7ed;
