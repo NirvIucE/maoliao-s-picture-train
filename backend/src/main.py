@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from src import cache
 from src.logger import setup_logging, stop_logging
 from src.routers import agent, auth, images, public_images, users
 
@@ -28,6 +29,8 @@ mimetypes.add_type("image/webp", ".webp")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("应用启动")
+    # 预热 Redis 连接（7.1 优化项：失败自动降级，不阻塞启动）
+    await cache.init_redis()
     yield
     logger.info("应用关闭，排空日志队列")
     stop_logging()

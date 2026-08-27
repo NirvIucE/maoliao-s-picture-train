@@ -43,8 +43,23 @@ async def get_redis() -> aioredis.Redis:
             password=REDIS_PASSWORD or None,
             decode_responses=True,
             socket_connect_timeout=0.5,
+            # 7.1 优化项：keepalive + 空闲健康检查，减少连接建立/断连抖动
+            socket_keepalive=True,
+            health_check_interval=30,
         )
     return _redis_pool
+
+
+async def init_redis() -> bool:
+    """应用启动时预热 Redis 连接（幂等，失败自动降级，绝不阻塞启动）"""
+    try:
+        ok = await _health_check()
+        if ok:
+            logger.info("Redis 连接预热完成")
+        return ok
+    except Exception as e:  # 预热失败仅记录，不影响应用启动
+        _set_unavailable(e)
+        return False
 
 
 # ── 缓存 Key 前缀 ──

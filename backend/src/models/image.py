@@ -4,14 +4,26 @@
 import os
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+)
 from sqlalchemy.orm import relationship
 
 from src.database import Base
 from src.models.tag import image_tags
 
+
 class Image(Base):
     __tablename__ = "images"
+    # 复合索引：用户图片列表按 user_id 定位 + custom_name 前缀搜索（7.1 优化项）
+    __table_args__ = (
+        Index("ix_images_user_custom_name", "user_id", "custom_name"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
