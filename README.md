@@ -191,7 +191,3 @@ locust -f locustfile.py --headless -u 50 -r 10 -t 30s --host http://localhost:80
 - `user_id + custom_name` 复合索引（个人图库搜索）；公共图库搜索只按 `custom_name`
 - 公共图库匿名可浏览（Optional auth）
 
-## 常见问题
-
-- **E2E 运行报端口占用**：`reuseExistingServer: false` 要求 8000/5173 空闲，先停掉手动启动的后端/前端再跑。
-- **浏览器下载慢**：`npx playwright install chromium` 失败时用 `PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright`。
