@@ -9,7 +9,7 @@ from passlib.context import CryptContext
 
 from src.config import JWT_ALGORITHM, JWT_EXPIRE_MINUTES, JWT_SECRET_KEY
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=10)
 
 def hash_password(password: str):
     """明文密码->bcrypt哈希"""
