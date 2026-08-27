@@ -1,11 +1,3 @@
-'''
-Author: NirvIucE 1750682685@qq.com
-Date: 2026-08-27 18:59:16
-LastEditors: NirvIucE 1750682685@qq.com
-LastEditTime: 2026-08-27 19:07:43
-FilePath: /new-picture-train/backend/scripts/e2e_setup.py
-Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
-'''
 """
 E2E 环境准备脚本（由 Playwright webServer 在启动后端前执行）
 

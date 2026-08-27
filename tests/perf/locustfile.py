@@ -1,11 +1,3 @@
-'''
-Author: NirvIucE 1750682685@qq.com
-Date: 2026-08-27 03:42:53
-LastEditors: NirvIucE 1750682685@qq.com
-LastEditTime: 2026-08-27 03:42:57
-FilePath: \new-picture-train\tests\perf\locustfile.py
-Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
-'''
 """
 猫里奥全栈云图库 — Locust 压测脚本（见计划第 4 节）
 
