@@ -11,7 +11,11 @@ from sqlalchemy.orm import Session
 from src.cache import cache_get, cache_set
 from src.models.user import User
 from src.schemas.user import UserCreate
-from src.utils.security import create_access_token, hash_password, verify_password
+from src.utils.security import (
+    create_access_token,
+    hash_password_async,
+    verify_password_async,
+)
 
 USER_INFO_TTL = 600 # 用户信息缓存10分钟
 
@@ -20,7 +24,7 @@ AVATAR_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads", "avatars")
 # 允许的头像扩展名
 ALLOWED_AVATAR_EXT = {".jpg", ".jpeg", ".png", ".webp"}
 
-def register_user(db: Session, user_data :UserCreate) -> User:
+async def register_user(db: Session, user_data :UserCreate) -> User:
     """注册新用户"""
     existing = db.query(User).filter(
        (User.username == user_data.username)|
@@ -34,7 +38,7 @@ def register_user(db: Session, user_data :UserCreate) -> User:
     new_user = User(
         username = user_data.username,
         email = user_data.email,
-        hashed_password = hash_password(user_data.password),
+        hashed_password = await hash_password_async(user_data.password),
         uid = str(uuid.uuid4()),
     )
     db.add(new_user)
@@ -45,10 +49,10 @@ def register_user(db: Session, user_data :UserCreate) -> User:
     # 需要 refresh 才能取到。
     return new_user
 
-def authenticate_user(db: Session, username: str, password: str) -> dict:
+async def authenticate_user(db: Session, username: str, password: str) -> dict:
     """验证用户登录,成功返回Token"""
     user = db.query(User).filter(User.username == username).first()
-    if not user or not verify_password(password, user.hashed_password):
+    if not user or not await verify_password_async(password, user.hashed_password):
         raise HTTPException(
             status_code = status.HTTP_401_UNAUTHORIZED,
             detail = "用户名或密码错误"
@@ -92,13 +96,13 @@ def update_username(db: Session, user: User, new_username: str) -> User:
     return user
 
 
-def change_password(db: Session, user: User, old_password: str, new_password: str) -> None:
+async def change_password(db: Session, user: User, old_password: str, new_password: str) -> None:
     """修改密码（校验旧密码 + 新密码哈希）"""
-    if not verify_password(old_password, user.hashed_password):
+    if not await verify_password_async(old_password, user.hashed_password):
         raise HTTPException(status_code=400, detail="旧密码错误")
     if len(new_password) < 6:
         raise HTTPException(status_code=400, detail="新密码至少 6 位")
-    user.hashed_password = hash_password(new_password)
+    user.hashed_password = await hash_password_async(new_password)
     db.commit()
 
 

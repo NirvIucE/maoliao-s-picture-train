@@ -73,12 +73,8 @@ def get_public_images(db: Session, user: User | None, skip: int = 0, limit: int 
     # admin: 看全部 approved（不加额外过滤）
     if search:
         pattern = f"%{search}%"
-        query = query.filter(
-            or_(
-                Image.custom_name.ilike(pattern),
-                Image.original_name.ilike(pattern),
-            )
-        )
+        # 公共图库搜索只匹配自定义名称（用户要求：不搜原始文件名）
+        query = query.filter(Image.custom_name.ilike(pattern))
     total = query.count()
     rows = query.order_by(PublicImage.created_at.desc()).offset(skip).limit(limit).all()
     items = [_build_item(pi, img, u) for pi, img, u in rows]

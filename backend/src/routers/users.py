@@ -79,7 +79,7 @@ async def change_my_password(
     current_user: User = Depends(get_current_user),
 ):
     """修改密码"""
-    change_password(db, current_user, req.old_password, req.new_password)
+    await change_password(db, current_user, req.old_password, req.new_password)
     return {"message": "密码已更新"}
 
 

@@ -89,6 +89,26 @@ class TestListPublic:
         assert r.status_code == 200
         assert r.json()["total"] >= 1
 
+    def test_list_search_custom_name(self, client, other_user_headers, approved_public_id):
+        """搜索 custom_name 关键词（fixture）→ 命中"""
+        r = client.get(
+            "/api/public/images",
+            headers=other_user_headers,
+            params={"search": "fixture"},
+        )
+        assert r.status_code == 200
+        assert r.json()["total"] >= 1
+
+    def test_list_search_not_original_name(self, client, other_user_headers, approved_public_id):
+        """搜索只按 custom_name：original_name（test.png）不参与匹配 → 不命中"""
+        r = client.get(
+            "/api/public/images",
+            headers=other_user_headers,
+            params={"search": "test.png"},
+        )
+        assert r.status_code == 200
+        assert r.json()["total"] == 0
+
 
 class TestMySubmissions:
     def test_my_submissions(self, client, auth_headers, pending_public_id):

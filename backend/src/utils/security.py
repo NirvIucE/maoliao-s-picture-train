@@ -1,7 +1,7 @@
 """
 JWT 和密码工具函数
 """
-
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 from jose import JWTError, jwt
@@ -18,6 +18,14 @@ def hash_password(password: str):
 def verify_password(plain_password: str, hashed_password: str):
     """验证明文密码是否匹配哈希密码"""
     return pwd_context.verify(plain_password, hashed_password)
+
+async def hash_password_async(password: str) -> str:
+    """异步版哈希：bcrypt 为 CPU 密集计算，丢线程池执行，避免阻塞事件循环"""
+    return await asyncio.to_thread(hash_password, password)
+
+async def verify_password_async(plain_password: str, hashed_password: str) -> bool:
+    """异步版校验：同 hash_password_async"""
+    return await asyncio.to_thread(verify_password, plain_password, hashed_password)
 
 def create_access_token(data: dict) -> str:
     """生成 JWT token"""

@@ -13,12 +13,12 @@ router = APIRouter(prefix="/api/auth", tags=["认证"])
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register(user_data: UserCreate, db: Session = Depends(get_db)):
+async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     """用户注册"""
-    return auth_service.register_user(db, user_data)
+    return await auth_service.register_user(db, user_data)
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """用户登录（OAuth2 密码模式，支持 Swagger Authorize 按钮和前端表单提交）"""
-    return auth_service.authenticate_user(db, form_data.username, form_data.password)
+    return await auth_service.authenticate_user(db, form_data.username, form_data.password)
