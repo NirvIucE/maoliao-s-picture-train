@@ -145,3 +145,53 @@ uv run python scripts/promote_admin.py <用户名>
 
 - 已有数据库首次引入迁移：使用空基线 + `alembic stamp head` 标记现有库。
 - 后续增量变更：`uv run alembic revision --autogenerate -m "说明"` 生成迁移，再 `uv run alembic upgrade head` 应用。
+
+## 测试
+
+完整测试计划与各阶段结论见 `.trae/documents/learning_test_plan.md`。测试分 4 层 + 独立冒烟层：
+
+| 层 | 工具 | 位置 | 覆盖 |
+|----|------|------|------|
+| 冒烟测试 | pytest | `backend/tests/test_smoke.py` | 注册→登录→上传→列表→提交公共库→审核→可见（9 步主链路） |
+| 接口测试 | pytest（独立测试库 `cat_pic_test` + 事务回滚） | `backend/tests/` | 全部模块端点（108 用例） |
+| AI 应用测试 | pytest（respx mock + 真实冒烟） | `backend/tests/test_ai_flow.py` | SSE 流式、AI 错误降级、payload 校验 |
+| 前端 E2E | Playwright | `frontend/e2e/` | 4 条用户流（注册上传 / 提交审核 / 详情编辑 / AI 对话） |
+| 压力测试 | Locust | `tests/perf/locustfile.py` | 5 场景，50 并发 30s 约 700 请求 0 失败 |
+
+### 运行接口测试
+
+```powershell
+cd backend
+uv run pytest tests/ -q
+```
+
+### 运行 E2E 测试
+
+需保证 8000/5173 端口空闲（Playwright 会自动拉起前后端，使用专用库 `cat_pic_e2e`，不污染开发数据）：
+
+```powershell
+cd frontend
+npm run test:e2e
+```
+
+### 运行压测
+
+```powershell
+# 1. 启动后端
+cd backend && uv run uvicorn src.main:app --port 8000
+# 2. 启动 Locust（另开终端）
+cd tests/perf
+locust -f locustfile.py --headless -u 50 -r 10 -t 30s --host http://localhost:8000 --only-summary
+```
+
+### 性能优化记录（7.1 节）
+
+- bcrypt rounds 降至 10（注册 552→138ms）+ `asyncio.to_thread` 异步化（不再阻塞事件循环）
+- Redis 连接池预热（lifespan `init_redis`）+ `socket_keepalive` + `health_check_interval`
+- `user_id + custom_name` 复合索引（个人图库搜索）；公共图库搜索只按 `custom_name`
+- 公共图库匿名可浏览（Optional auth）
+
+## 常见问题
+
+- **E2E 运行报端口占用**：`reuseExistingServer: false` 要求 8000/5173 空闲，先停掉手动启动的后端/前端再跑。
+- **浏览器下载慢**：`npx playwright install chromium` 失败时用 `PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright`。
