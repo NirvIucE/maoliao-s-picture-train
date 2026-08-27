@@ -10,6 +10,9 @@ const router = useRouter()
 
 const image = ref<ImageItem | null>(null)
 const loading = ref(true)
+// 内联消息（与 C1 阶段风格一致，替代 alert）
+const successMsg = ref("")
+const errorMsg = ref("")
 // 操作序列（按用户操作顺序，与后端执行顺序一致）
 const operations = ref<EditOperation[]>([])
 
@@ -169,13 +172,16 @@ watch(aiEditMode, (val) => {
 })
 
 onMounted(async () => {
+  successMsg.value = ""
+  errorMsg.value = ""
   try {
     const id = Number(route.params.id)
     image.value = await getImageDetail(id)
     loadImageToCanvas(imageUrl.value)
   } catch (err: any) {
-    alert(err.response?.data?.detail || "加载失败")
-    router.push("/gallery")
+    errorMsg.value = err.response?.data?.detail || "加载失败"
+    // 让用户看到错误信息后再返回图库
+    setTimeout(() => router.push("/gallery"), 2000)
   } finally {
     loading.value = false
   }
@@ -230,9 +236,11 @@ async function handleRemoveBg() {
     aiProcessed.value = true
     URL.revokeObjectURL(url)
     render()
-    alert("AI 抠图完成")
+    successMsg.value = "AI 抠图完成"
+    errorMsg.value = ""
   } catch (err: any){
-    alert("AI 抠图失败：" + (err?.message || err))
+    errorMsg.value = "AI 抠图失败：" + (err?.message || err)
+    successMsg.value = ""
   } finally {
     aiProcessing.value = false
   }
@@ -315,10 +323,12 @@ async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
 async function handleAIEdit(){
   if (!image.value || aiEditing.value) return
   const prompt = aiEditPrompt.value.trim()
-  if (!prompt) { alert("请输入编辑指令"); return }
+  if (!prompt) { errorMsg.value = "请输入编辑指令"; successMsg.value = ""; return }
   if (!currentImage.value) return
 
   aiEditing.value = true
+  successMsg.value = ""
+  errorMsg.value = ""
   try {
     // 1. 合成提示图：当前图 + 红色涂鸦标记
     const cur = currentImage.value
@@ -357,10 +367,12 @@ async function handleAIEdit(){
     aiEditMode.value = false
     aiEditPrompt.value = ""
     render()
-    alert("AI 编辑完成")
+    successMsg.value = "AI 编辑完成"
+    errorMsg.value = ""
 
   }catch(err: any){
-    alert("AI 编辑失败：" + (err?.response?.data?.detail || err?.message || err))
+    errorMsg.value = "AI 编辑失败：" + (err?.response?.data?.detail || err?.message || err)
+    successMsg.value = ""
   }finally{
     aiEditing.value = false
   }
@@ -478,9 +490,12 @@ onBeforeUnmount(() => {
 // 保存
 function openSaveDialog() {
   if (operations.value.length === 0 && !aiProcessed.value) {
-    alert("没有需要保存的修改")
+    errorMsg.value = "没有需要保存的修改"
+    successMsg.value = ""
     return
   }
+  successMsg.value = ""
+  errorMsg.value = ""
   showSaveDialog.value = true
 }
 
@@ -506,11 +521,13 @@ async function handleSave(mode: "overwrite" | "new") {
     }
     
     if (mode === "new") {
-      alert("已另存为新图片")
+      successMsg.value = "已另存为新图片"
+      errorMsg.value = ""
       showSaveDialog.value = false
       router.push("/gallery")
     } else {
-      alert("已覆盖保存")
+      successMsg.value = "已覆盖保存"
+      errorMsg.value = ""
       showSaveDialog.value = false
       // 重新加载原图
       const id = image.value.id
@@ -521,7 +538,8 @@ async function handleSave(mode: "overwrite" | "new") {
       loadImageToCanvas(`${fresh.image_url}?t=${Date.now()}`)
     }
   } catch (err: any) {
-    alert(err.response?.data?.detail || "保存失败")
+    errorMsg.value = err.response?.data?.detail || "保存失败"
+    successMsg.value = ""
   } finally {
     saving.value = false
   }
@@ -545,12 +563,15 @@ function cancelRename() {
 async function confirmRename() {
   if (!image.value || renamingSaving.value) return
   renamingSaving.value = true
+  successMsg.value = ""
+  errorMsg.value = ""
   try {
     const updated = await updateImageName(image.value.id, newName.value.trim())
     image.value = updated
     renaming.value = false
+    successMsg.value = "名称已更新"
   } catch (err: any) {
-    alert(err.response?.data?.detail || "修改名称失败")
+    errorMsg.value = err.response?.data?.detail || "修改名称失败"
   } finally {
     renamingSaving.value = false
   }
@@ -563,6 +584,9 @@ async function confirmRename() {
             <button class="btn-back" @click="goBack">← 返回图库</button>
             <h2>{{ image?.display_name || "图片详情" }}</h2>
         </div>
+
+        <p v-if="successMsg" class="success-msg">{{ successMsg }}</p>
+        <p v-if="errorMsg" class="error-msg">{{ errorMsg }}</p>
 
         <p v-if="loading">加载中...</p>
 
@@ -721,6 +745,8 @@ async function confirmRename() {
 .detail-header h2 { margin: 0; }
 .btn-back { padding: 6px 14px; border: 1px solid #ccc; background: white; border-radius: 4px; cursor: pointer; }
 .btn-back:hover { background: #f5f5f5; }
+.success-msg { color: #67c23a; margin-bottom: 12px; }
+.error-msg { color: #f56c6c; margin-bottom: 12px; }
 
 .detail-body { display: flex; gap: 24px; align-items: flex-start; }
 
