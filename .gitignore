@@ -38,3 +38,6 @@ fileheader.config.json
 
 # 日志文件
 logs/
+
+# 覆盖率产物
+.coverage
