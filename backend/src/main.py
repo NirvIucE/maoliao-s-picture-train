@@ -13,7 +13,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.database import Base, engine
 from src.logger import setup_logging, stop_logging
 from src.routers import agent, auth, images, public_images, users
 
@@ -24,10 +23,8 @@ logger = logging.getLogger(__name__)
 # 注册 .webp 的 MIME 类型（Windows 上默认不识别）
 mimetypes.add_type("image/webp", ".webp")
 
-# 创建所有 ORM 表（学习阶段用，生产环境应使用 Alembic 迁移）
-Base.metadata.create_all(bind=engine)
-
 # ② lifespan：app 启动/关闭钩子，关闭时排空日志队列
+# 注：数据库 schema 由 Alembic 管理（部署时执行 alembic upgrade head），应用不再建表
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("应用启动")
