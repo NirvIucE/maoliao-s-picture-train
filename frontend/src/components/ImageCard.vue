@@ -15,6 +15,9 @@ const deleting = ref(false)
 // 提交公共库反馈消息（替代 alert）
 const submitMsg = ref("")
 const submitError = ref(false)
+// 提交公共库时可选携带标签
+const showTagInput = ref(false)
+const submitTags = ref("")
 
 async function handleDelete() {
   deleting.value = true
@@ -35,8 +38,14 @@ async function handleSubmitPublic() {
   submitMsg.value = ""
   submitError.value = false
   try {
-    await submitToPublic(props.image.id)
+    const tags = submitTags.value
+      .split(/[,，、\s]+/)
+      .map((t) => t.trim().replace(/^#+/, ""))
+      .filter(Boolean)
+    await submitToPublic(props.image.id, tags)
     submitMsg.value = "已提交到公共图库，等待审核"
+    showTagInput.value = false
+    submitTags.value = ""
   } catch (error: any) {
     submitMsg.value = error.response?.data?.detail || "提交失败"
     submitError.value = true
@@ -68,9 +77,14 @@ function goDetail() {
               <button class="btn-download" @click="handleDownload">
                 下载原图
               </button>
-              <button class="btn-public" @click="handleSubmitPublic">
+              <button v-if="!showTagInput" class="btn-public" @click="showTagInput = true">
                 提交公共库
               </button>
+              <div v-else class="tag-submit">
+                <input v-model="submitTags" placeholder="标签（可选），逗号分隔" @keyup.enter="handleSubmitPublic" />
+                <button class="btn-public" @click="handleSubmitPublic">确认提交</button>
+                <button class="btn-cancel" @click="showTagInput = false; submitTags = ''">取消</button>
+              </div>
               <button v-if="!showConfirm" class="btn-delete" @click="showConfirm = true">删除</button>
               <div v-else class="confirm">
                 <span>确认？</span>
@@ -164,4 +178,13 @@ function goDetail() {
 .btn-no  { padding: 3px 10px; background: #e4e7ed; border: none; border-radius: 4px; cursor: pointer; }
 .submit-msg { margin: 8px 0 0; font-size: 12px; color: #67c23a; }
 .submit-msg.error { color: #f56c6c; }
+.tag-submit { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tag-submit input {
+  width: 140px;
+  padding: 3px 8px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.btn-cancel { padding: 3px 10px; background: #e4e7ed; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
 </style>

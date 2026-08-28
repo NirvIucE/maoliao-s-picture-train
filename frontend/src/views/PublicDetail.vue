@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { getPublicDetail, deletePublicImage, setPublicVisibility, downloadPublicImage, type PublicImageDetail } from "@/api/public"
+import { getPublicDetail, deletePublicImage, setPublicVisibility, downloadPublicImage, addTags, removeTag, type PublicImageDetail } from "@/api/public"
 import { useAuthStore } from "@/stores/auth"
 
 const route = useRoute()
@@ -12,11 +12,55 @@ const detail = ref<PublicImageDetail | null>(null)
 const loading = ref(false)
 const acting = ref(false)
 const downloading = ref(false)
+// 标签输入与操作状态
+const tagInput = ref("")
+const tagActing = ref(false)
 // 内联消息（与 C1/C2 阶段风格一致，替代 alert）
 const successMsg = ref("")
 const errorMsg = ref("")
 
 const canOperate = computed(() => !!detail.value && (detail.value.is_owner || detail.value.is_admin))
+
+// 解析输入：逗号/空格/顿号分隔，去空白与 # 前缀
+function parseTags(raw: string): string[] {
+    return raw
+        .split(/[,，、\s]+/)
+        .map((t) => t.trim().replace(/^#+/, ""))
+        .filter(Boolean)
+}
+
+async function handleAddTag() {
+    if (!detail.value || !tagInput.value.trim()) return
+    tagActing.value = true
+    successMsg.value = ""
+    errorMsg.value = ""
+    try {
+        const res = await addTags(detail.value.id, parseTags(tagInput.value))
+        tagInput.value = ""
+        detail.value.tags = res.tags
+        successMsg.value = "标签已更新"
+    } catch (error: any) {
+        errorMsg.value = error.response?.data?.detail || "添加标签失败"
+    } finally {
+        tagActing.value = false
+    }
+}
+
+async function handleRemoveTag(tagName: string) {
+    if (!detail.value) return
+    tagActing.value = true
+    successMsg.value = ""
+    errorMsg.value = ""
+    try {
+        await removeTag(detail.value.id, tagName)
+        detail.value.tags = detail.value.tags.filter((t) => t !== tagName)
+        successMsg.value = "标签已删除"
+    } catch (error: any) {
+        errorMsg.value = error.response?.data?.detail || "删除标签失败"
+    } finally {
+        tagActing.value = false
+    }
+}
 
 async function load() {
   loading.value = true
@@ -98,6 +142,21 @@ onMounted(load)
           <span class="dot">·</span>
           可见性：{{ detail.is_visible ? "普通用户可见" : "已隐藏" }}
         </p>
+        <div class="tags-section">
+          <div v-if="detail.tags.length" class="tag-list">
+            <span v-for="tag in detail.tags" :key="tag" class="tag-chip">
+              #{{ tag }}
+              <button v-if="canOperate" class="tag-remove" :disabled="tagActing" title="删除标签" @click="handleRemoveTag(tag)">×</button>
+            </span>
+          </div>
+          <div v-else class="tag-empty">暂无标签</div>
+          <div v-if="canOperate" class="tag-add">
+            <input v-model="tagInput" placeholder="输入标签，逗号/空格分隔" @keyup.enter="handleAddTag" />
+            <button class="btn-tag-add" :disabled="tagActing || !tagInput.trim()" @click="handleAddTag">
+              {{ tagActing ? "保存中..." : "添加标签" }}
+            </button>
+          </div>
+        </div>
         <div class="download-section">
           <button v-if="auth.isLoggedIn" class="btn-download" :disabled="downloading" @click="handleDownload">
             {{ downloading ? "下载中..." : "下载图片" }}
@@ -169,4 +228,25 @@ onMounted(load)
 .btn-download:disabled { opacity: 0.5; cursor: not-allowed; }
 .download-locked { display: flex; align-items: center; gap: 12px; }
 .download-locked .hint { color: #e6a23c; font-size: 14px; }
+.tags-section { margin: 16px 0; }
+.tag-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #ecf5ff;
+  color: #409eff;
+  border: 1px solid #d9ecff;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 13px;
+}
+.tag-remove { border: none; background: none; color: #909399; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
+.tag-remove:hover { color: #f56c6c; }
+.tag-remove:disabled { cursor: not-allowed; }
+.tag-empty { color: #c0c4cc; font-size: 13px; margin-bottom: 12px; }
+.tag-add { display: flex; gap: 8px; }
+.tag-add input { flex: 1; padding: 6px 10px; border: 1px solid #dcdfe6; border-radius: 4px; }
+.btn-tag-add { padding: 6px 14px; background: #409eff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+.btn-tag-add:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

@@ -11,6 +11,7 @@ from src.database import get_db
 from src.models.user import User
 from src.routers.users import get_current_user, get_current_user_optional
 from src.schemas.public_image import (
+    AddTagsRequest,
     PublicImageDetailResponse,
     PublicImageListResponse,
     PublicImageResponse,
@@ -37,8 +38,8 @@ async def submit(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """提交图片到公共图库（仅限自己图库已有图片）"""
-    return public_service.submit_to_public(db, req.image_id, current_user)
+    """提交图片到公共图库（仅限自己图库已有图片，可选携带标签）"""
+    return public_service.submit_to_public(db, req.image_id, current_user, req.tags)
 
 
 @router.get("", response_model=PublicImageListResponse)
@@ -142,6 +143,30 @@ async def visibility(
     """切换可见性（管理员或上传者）"""
     public_service.set_visibility(db, public_id, req.visible, current_user)
     return {"message": "已更新可见性"}
+
+
+@router.post("/{public_id}/tags")
+async def add_tags(
+    public_id: int,
+    req: AddTagsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """给公共图库图片添加标签（上传者本人或管理员）"""
+    tags = public_service.add_tags_to_public(db, public_id, req.tags, current_user)
+    return {"message": "标签已更新", "tags": tags}
+
+
+@router.delete("/{public_id}/tags/{tag_name}")
+async def remove_tag(
+    public_id: int,
+    tag_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """从公共图库图片移除标签（上传者本人或管理员）"""
+    public_service.remove_tag_from_public(db, public_id, tag_name, current_user)
+    return {"message": "标签已删除"}
 
 
 @router.delete("/{public_id}")

@@ -64,7 +64,7 @@ onMounted(() => load())
       <input
         v-model="searchInput"
         type="text"
-        placeholder="搜索图片名称..."
+        placeholder="搜索图片名称 / #标签（如 #猫）"
         @input="onSearch"
       />
     </div>
@@ -133,6 +133,16 @@ onMounted(() => load())
   text-overflow: ellipsis;
 }
 .author { margin: 0; color: #909399; font-size: 13px; }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.tag-chip {
+  background: #ecf5ff;
+  color: #409eff;
+  border: 1px solid #d9ecff;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 12px;
+}
+.tag-more { color: #909399; font-size: 12px; line-height: 20px; }
 .count { color: #909399; margin-top: 20px; }
 .load-more {
   display: block;

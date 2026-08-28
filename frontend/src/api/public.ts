@@ -1,11 +1,3 @@
-/*
- * @Author: NirvIucE 1750682685@qq.com
- * @Date: 2026-08-20 20:22:37
- * @LastEditors: NirvIucE 1750682685@qq.com
- * @LastEditTime: 2026-08-27 21:29:15
- * @FilePath: \new-picture-train\frontend\src\api\public.ts
- * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
- */
 import api from "./client"
 
 export interface PublicImageItem {
@@ -22,6 +14,7 @@ export interface PublicImageItem {
     thumbnail_url: string | null
     image_url: string | null
     is_visible: boolean
+    tags: string[]
 }
 
 export interface PublicImageListResponse {
@@ -29,9 +22,9 @@ export interface PublicImageListResponse {
     items: PublicImageItem[]
 }
 
-// 提交图片到公共图库（仅从自己图库选图）
-export function submitToPublic(imageId: number): Promise<PublicImageItem> {
-    return api.post("/public/images", { image_id: imageId })
+// 提交图片到公共图库（仅从自己图库选图，可选携带标签）
+export function submitToPublic(imageId: number, tags: string[] = []): Promise<PublicImageItem> {
+    return api.post("/public/images", { image_id: imageId, tags })
 }
 
 // 浏览公共图库（仅审核通过的图片，支持按名称搜索）
@@ -77,6 +70,16 @@ export function getPublicDetail(publicId: number): Promise<PublicImageDetail> {
 // 切换可见性
 export function setPublicVisibility(publicId: number, visible: boolean): Promise<{ message: string }> {
     return api.post(`/public/images/${publicId}/visibility`, { visible })
+}
+
+// 给公共图库图片添加标签（上传者本人或管理员）
+export function addTags(publicId: number, tags: string[]): Promise<{ message: string; tags: string[] }> {
+    return api.post(`/public/images/${publicId}/tags`, { tags })
+}
+
+// 从公共图库图片移除标签（上传者本人或管理员）
+export function removeTag(publicId: number, tagName: string): Promise<{ message: string }> {
+    return api.delete(`/public/images/${publicId}/tags/${encodeURIComponent(tagName)}`)
 }
 
 // 下载公共图库图片（需登录）

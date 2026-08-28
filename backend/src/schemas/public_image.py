@@ -8,8 +8,9 @@ from pydantic import BaseModel
 
 
 class PublicImageSubmitRequest(BaseModel):
-    """提交到公共图库请求（仅从自己图库选图）"""
+    """提交到公共图库请求（仅从自己图库选图，可选标签）"""
     image_id: int
+    tags: list[str] = []
 
 
 class PublicImageResponse(BaseModel):
@@ -27,6 +28,7 @@ class PublicImageResponse(BaseModel):
     thumbnail_url: str | None = None
     image_url: str | None = None
     is_visible: bool = True
+    tags: list[str] = []
 
 
 class PublicImageListResponse(BaseModel):
@@ -55,3 +57,8 @@ class PublicImageDetailResponse(PublicImageResponse):
 class SetVisibilityRequest(BaseModel):
     """切换可见性请求"""
     visible: bool
+
+
+class AddTagsRequest(BaseModel):
+    """添加标签请求"""
+    tags: list[str]

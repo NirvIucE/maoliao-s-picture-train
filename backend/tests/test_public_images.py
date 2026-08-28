@@ -299,3 +299,124 @@ class TestAnonymous:
         r = client.get("/api/public/images")
         ids = [item["id"] for item in r.json()["items"]]
         assert pending_public_id not in ids
+
+
+class TestTags:
+    """阶段 12：公共图库标签（提交带标签 / 添加 / 删除 / 权限 / #严格匹配搜索）"""
+
+    def test_submit_with_tags(self, client, auth_headers, test_image):
+        """提交时携带标签 → 200 + 规范化（去#、去空、去重）"""
+        r = client.post(
+            "/api/public/images",
+            headers=auth_headers,
+            json={"image_id": test_image, "tags": ["猫", "#风景", " 猫 ", ""]},
+        )
+        assert r.status_code == 200
+        assert r.json()["tags"] == ["猫", "风景"]
+
+    def test_submit_without_tags(self, client, auth_headers, pending_public_id):
+        """不带标签提交 → tags 为空列表"""
+        r = client.get(f"/api/public/images/{pending_public_id}", headers=auth_headers)
+        assert r.json()["tags"] == []
+
+    def test_add_tags_owner(self, client, auth_headers, pending_public_id):
+        """owner 添加标签 → 200 + 返回当前全部标签"""
+        r = client.post(
+            f"/api/public/images/{pending_public_id}/tags",
+            headers=auth_headers,
+            json={"tags": ["夜景"]},
+        )
+        assert r.status_code == 200
+        assert r.json()["tags"] == ["夜景"]
+
+    def test_add_tags_other_user_forbidden(self, client, other_user_headers, pending_public_id):
+        """bob 给 alice 的图加标签 → 403"""
+        r = client.post(
+            f"/api/public/images/{pending_public_id}/tags",
+            headers=other_user_headers,
+            json={"tags": ["x"]},
+        )
+        assert r.status_code == 403
+
+    def test_add_tags_admin(self, client, admin_headers, pending_public_id):
+        """admin 可给任意图加标签 → 200"""
+        r = client.post(
+            f"/api/public/images/{pending_public_id}/tags",
+            headers=admin_headers,
+            json={"tags": ["管理员加的"]},
+        )
+        assert r.status_code == 200
+        assert "管理员加的" in r.json()["tags"]
+
+    def test_remove_tag_owner(self, client, auth_headers, pending_public_id):
+        """owner 删除标签 → 200；重复删除 → 404"""
+        client.post(
+            f"/api/public/images/{pending_public_id}/tags",
+            headers=auth_headers,
+            json={"tags": ["猫"]},
+        )
+        r = client.delete(f"/api/public/images/{pending_public_id}/tags/猫", headers=auth_headers)
+        assert r.status_code == 200
+        r2 = client.delete(f"/api/public/images/{pending_public_id}/tags/猫", headers=auth_headers)
+        assert r2.status_code == 404
+
+    def test_remove_tag_other_user_forbidden(self, client, other_user_headers, pending_public_id):
+        """bob 删 alice 的标签 → 403"""
+        client.post(
+            f"/api/public/images/{pending_public_id}/tags",
+            headers=other_user_headers,
+            json={"tags": ["猫"]},
+        )
+        assert client.delete(
+            f"/api/public/images/{pending_public_id}/tags/猫", headers=other_user_headers
+        ).status_code == 403
+
+    def test_search_tag_exact_match(
+        self, client, auth_headers, other_user_headers, approved_public_id
+    ):
+        """#标签 搜索为严格匹配：#猫 命中标签"猫"；#狸花猫 不命中"""
+        client.post(
+            f"/api/public/images/{approved_public_id}/tags",
+            headers=auth_headers,
+            json={"tags": ["猫"]},
+        )
+        r = client.get("/api/public/images", headers=other_user_headers, params={"search": "#猫"})
+        assert r.status_code == 200
+        assert approved_public_id in [i["id"] for i in r.json()["items"]]
+        # 严格匹配：该图没有"狸花猫"标签 → 不命中
+        r2 = client.get(
+            "/api/public/images",
+            headers=other_user_headers,
+            params={"search": "#狸花猫"},
+        )
+        assert r2.status_code == 200
+        assert approved_public_id not in [i["id"] for i in r2.json()["items"]]
+
+    def test_search_tag_does_not_affect_normal_search(
+        self, client, auth_headers, other_user_headers, approved_public_id
+    ):
+        """普通关键词搜索不受 # 分支影响：custom_name 仍可命中"""
+        client.post(
+            f"/api/public/images/{approved_public_id}/tags",
+            headers=auth_headers,
+            json={"tags": ["猫"]},
+        )
+        # fixture 图的 custom_name 含 "fixture" 前缀
+        r = client.get(
+            "/api/public/images",
+            headers=other_user_headers,
+            params={"search": "fixture"},
+        )
+        assert r.status_code == 200
+        assert r.json()["total"] >= 1
+
+    def test_anonymous_can_search_tag(self, client, auth_headers, approved_public_id):
+        """匿名用户可用 #标签 搜索 → 200 + 命中"""
+        client.post(
+            f"/api/public/images/{approved_public_id}/tags",
+            headers=auth_headers,
+            json={"tags": ["猫"]},
+        )
+        r = client.get("/api/public/images", params={"search": "#猫"})
+        assert r.status_code == 200
+        assert approved_public_id in [i["id"] for i in r.json()["items"]]
