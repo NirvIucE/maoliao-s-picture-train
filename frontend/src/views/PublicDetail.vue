@@ -21,24 +21,32 @@ const errorMsg = ref("")
 
 const canOperate = computed(() => !!detail.value && (detail.value.is_owner || detail.value.is_admin))
 
-// 解析输入：逗号/空格/顿号分隔，去空白与 # 前缀
-function parseTags(raw: string): string[] {
-    return raw
-        .split(/[,，、\s]+/)
-        .map((t) => t.trim().replace(/^#+/, ""))
-        .filter(Boolean)
+// 单标签清洗：去首尾空白、剥掉所有前导 #、去空
+function cleanTag(raw: string): string {
+    return raw.trim().replace(/^#+/, "")
+}
+
+// 输入时即时剥离前导 #（多个 # 也无妨：##猫 → 猫）
+function onTagInput() {
+    tagInput.value = tagInput.value.replace(/^#+/, "")
 }
 
 async function handleAddTag() {
-    if (!detail.value || !tagInput.value.trim()) return
+    if (!detail.value) return
+    const tag = cleanTag(tagInput.value)
+    if (!tag) return
     tagActing.value = true
     successMsg.value = ""
     errorMsg.value = ""
     try {
-        const res = await addTags(detail.value.id, parseTags(tagInput.value))
+        if (detail.value.tags.includes(tag)) {
+            errorMsg.value = `标签"${tag}"已存在`
+            return
+        }
+        const res = await addTags(detail.value.id, [tag])
         tagInput.value = ""
         detail.value.tags = res.tags
-        successMsg.value = "标签已更新"
+        successMsg.value = `已添加标签 #${tag}`
     } catch (error: any) {
         errorMsg.value = error.response?.data?.detail || "添加标签失败"
     } finally {
@@ -151,9 +159,9 @@ onMounted(load)
           </div>
           <div v-else class="tag-empty">暂无标签</div>
           <div v-if="canOperate" class="tag-add">
-            <input v-model="tagInput" placeholder="输入标签，逗号/空格分隔" @keyup.enter="handleAddTag" />
+            <input v-model="tagInput" placeholder="输入标签后回车添加，无需 # 前缀" @input="onTagInput" @keyup.enter="handleAddTag" />
             <button class="btn-tag-add" :disabled="tagActing || !tagInput.trim()" @click="handleAddTag">
-              {{ tagActing ? "保存中..." : "添加标签" }}
+              {{ tagActing ? "添加中..." : "添加" }}
             </button>
           </div>
         </div>

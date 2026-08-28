@@ -17,7 +17,33 @@ const submitMsg = ref("")
 const submitError = ref(false)
 // 提交公共库时可选携带标签
 const showTagInput = ref(false)
-const submitTags = ref("")
+const tagInput = ref("")
+const pendingTags = ref<string[]>([])
+
+// 输入时即时剥离前导 #（##猫 → 猫）
+function onTagInput() {
+    tagInput.value = tagInput.value.replace(/^#+/, "")
+}
+
+// 逐个添加标签：清洗 + 去重后生成独立 chip
+function addPendingTag() {
+    const tag = tagInput.value.trim().replace(/^#+/, "")
+    if (!tag) return
+    if (!pendingTags.value.includes(tag)) {
+        pendingTags.value.push(tag)
+    }
+    tagInput.value = ""
+}
+
+function removePendingTag(tag: string) {
+    pendingTags.value = pendingTags.value.filter((t) => t !== tag)
+}
+
+function cancelSubmit() {
+    showTagInput.value = false
+    tagInput.value = ""
+    pendingTags.value = []
+}
 
 async function handleDelete() {
   deleting.value = true
@@ -38,14 +64,9 @@ async function handleSubmitPublic() {
   submitMsg.value = ""
   submitError.value = false
   try {
-    const tags = submitTags.value
-      .split(/[,，、\s]+/)
-      .map((t) => t.trim().replace(/^#+/, ""))
-      .filter(Boolean)
-    await submitToPublic(props.image.id, tags)
+    await submitToPublic(props.image.id, pendingTags.value)
     submitMsg.value = "已提交到公共图库，等待审核"
-    showTagInput.value = false
-    submitTags.value = ""
+    cancelSubmit()
   } catch (error: any) {
     submitMsg.value = error.response?.data?.detail || "提交失败"
     submitError.value = true
@@ -81,9 +102,16 @@ function goDetail() {
                 提交公共库
               </button>
               <div v-else class="tag-submit">
-                <input v-model="submitTags" placeholder="标签（可选），逗号分隔" @keyup.enter="handleSubmitPublic" />
+                <input v-model="tagInput" placeholder="标签（可选），回车添加" @input="onTagInput" @keyup.enter="addPendingTag" />
+                <button class="btn-tag-add" :disabled="!tagInput.trim()" title="添加标签" @click="addPendingTag">+</button>
+                <div v-if="pendingTags.length" class="pending-tags">
+                  <span v-for="t in pendingTags" :key="t" class="tag-chip">
+                    #{{ t }}
+                    <button class="tag-remove" title="移除标签" @click="removePendingTag(t)">×</button>
+                  </span>
+                </div>
                 <button class="btn-public" @click="handleSubmitPublic">确认提交</button>
-                <button class="btn-cancel" @click="showTagInput = false; submitTags = ''">取消</button>
+                <button class="btn-cancel" @click="cancelSubmit">取消</button>
               </div>
               <button v-if="!showConfirm" class="btn-delete" @click="showConfirm = true">删除</button>
               <div v-else class="confirm">
@@ -180,11 +208,35 @@ function goDetail() {
 .submit-msg.error { color: #f56c6c; }
 .tag-submit { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .tag-submit input {
-  width: 140px;
+  width: 130px;
   padding: 3px 8px;
   border: 1px solid #dcdfe6;
   border-radius: 4px;
   font-size: 13px;
 }
+.btn-tag-add {
+  padding: 3px 10px;
+  background: #409eff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-tag-add:disabled { opacity: 0.5; cursor: not-allowed; }
+.pending-tags { display: flex; flex-wrap: wrap; gap: 4px; width: 100%; }
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: #ecf5ff;
+  color: #409eff;
+  border: 1px solid #d9ecff;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 12px;
+}
+.tag-remove { border: none; background: none; color: #909399; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
+.tag-remove:hover { color: #f56c6c; }
 .btn-cancel { padding: 3px 10px; background: #e4e7ed; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
 </style>

@@ -15,6 +15,9 @@ test("流程2：提交公共库（带标签）→管理员审核通过→公共�
     const card = page.locator(".image-grid .card").filter({ hasText: imgName })
     await card.getByRole("button", { name: "提交公共库" }).click()
     await card.locator(".tag-submit input").fill(tagName)
+    await card.locator(".tag-submit input").press("Enter")
+    // 逐标签添加模式：输入回车后生成独立 chip
+    await expect(card.locator(".pending-tags .tag-chip", { hasText: tagName })).toBeVisible()
     await card.getByRole("button", { name: "确认提交" }).click()
     await expect(card.locator(".submit-msg")).toHaveText("已提交到公共图库，等待审核")
 
