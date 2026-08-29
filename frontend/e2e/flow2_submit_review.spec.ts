@@ -33,5 +33,6 @@ test("流程2：提交公共库（带标签）→管理员审核通过→公共�
     await logout(page)
     await page.goto("/public")
     await page.getByPlaceholder(/搜索图片名称/).fill(`#${tagName}`)
+    await page.getByRole("button", { name: "搜索" }).click()
     await expect(page.locator(".grid .name", { hasText: imgName })).toBeVisible()
 })

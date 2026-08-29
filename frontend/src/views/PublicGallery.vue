@@ -14,30 +14,25 @@ const aiEnabled = ref(false)
 const aiMode = ref<"semantic" | "vision">("semantic")
 const aiNote = ref("")
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-
 function onSearch() {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => {
-    if (aiEnabled.value) {
-      if (!searchInput.value.trim()) {
-        items.value = []
-        total.value = 0
-        hasMore.value = false
-        errorMsg.value = ""
-        aiNote.value = "输入搜索词后即可使用 AI 搜索"
-      } else {
-        aiLoad()
-      }
+  if (aiEnabled.value) {
+    if (!searchInput.value.trim()) {
+      items.value = []
+      total.value = 0
+      hasMore.value = false
+      errorMsg.value = ""
+      aiNote.value = "输入搜索词后即可使用 AI 搜索"
     } else {
-      load(searchInput.value || undefined)
+      aiLoad()
     }
-  }, 500)
+  } else {
+    load(searchInput.value || undefined)
+  }
 }
 
 function onAiToggle() {
-  if (searchTimer) clearTimeout(searchTimer)
-  onSearch()
+  // 仅切换 AI 开关/模式，不自动搜索；点击"搜索"按钮后执行
+  aiNote.value = aiEnabled.value && !searchInput.value.trim() ? "输入搜索词后即可使用 AI 搜索" : ""
 }
 
 async function load(search?: string) {
@@ -118,8 +113,8 @@ onMounted(() => load())
         v-model="searchInput"
         type="text"
         placeholder="搜索图片名称 / #标签（如 #猫）"
-        @input="onSearch"
       />
+      <button class="search-btn" :disabled="loading" @click="onSearch">搜索</button>
       <label class="ai-switch">
         <input type="checkbox" v-model="aiEnabled" @change="onAiToggle" />
         <span class="ai-switch-text">AI 搜索</span>
@@ -178,6 +173,16 @@ onMounted(() => load())
   border-radius: 4px;
   box-sizing: border-box;
 }
+.search-btn {
+  padding: 8px 16px;
+  background: #409eff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.search-btn:disabled { background: #a0cfff; cursor: not-allowed; }
 .ai-switch {
   display: inline-flex;
   align-items: center;
