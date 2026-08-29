@@ -32,6 +32,15 @@ export function getPublicImages(skip = 0, limit = 20, search?: string): Promise<
     return api.get("/public/images", { params: { skip, limit, search } })
 }
 
+// AI 搜索公共图库（语义：标题+标签 / 识图：视觉模型），note 为后端附加提示
+export interface AISearchResponse extends PublicImageListResponse {
+    note: string | null
+}
+
+export function aiSearchPublic(query: string, mode: "semantic" | "vision"): Promise<AISearchResponse> {
+    return api.post("/public/images/ai-search", { query, mode })
+}
+
 // 我的提交记录（含各状态）
 export function getMyPublicImages(skip = 0, limit = 20): Promise<PublicImageListResponse> {
     return api.get("/public/images/my", { params: { skip, limit } })

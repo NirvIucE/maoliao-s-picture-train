@@ -81,6 +81,21 @@ async def stream_llm(model_id: str, messages: list[dict],) -> AsyncGenerator[str
                     except json.JSONDecodeError:
                         continue
 
+async def complete_llm(model_id: str, messages: list[dict]) -> str:
+    """非流式调用：复用 stream_llm 把流收集为完整文本返回（用于 AI 搜索等需要完整结果的场景）"""
+    collected: list[str] = []
+    async for chunk in stream_llm(model_id, messages):
+        if chunk.startswith("data: "):
+            try:
+                payload = json.loads(chunk[6:])
+                text = payload.get("chunk", "")
+                if text:
+                    collected.append(text)
+            except json.JSONDecodeError:
+                continue
+    return "".join(collected)
+
+
 async def analyze_image(image_path: str, image_mime: str, model_id: str) -> AsyncGenerator[str, None]:
     """分析图片：读取文件 → base64 → 送视觉模型 → 流式返回"""
     # 读取图片并编码为 base64

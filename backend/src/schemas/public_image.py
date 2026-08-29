@@ -62,3 +62,9 @@ class SetVisibilityRequest(BaseModel):
 class AddTagsRequest(BaseModel):
     """添加标签请求"""
     tags: list[str]
+
+
+class AISearchRequest(BaseModel):
+    """AI 搜索请求"""
+    query: str
+    mode: Literal["semantic", "vision"] = "semantic"

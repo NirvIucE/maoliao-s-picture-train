@@ -194,9 +194,11 @@ def mock_models(monkeypatch):
         "siliconflow": {"api_key": "fake-key", "base_url": "https://api.siliconflow.cn/v1"},
     }
     from src.routers import agent as agent_router
-    from src.services import agent_service
+    from src.services import agent_service, public_service
 
     monkeypatch.setattr(agent_router, "MODEL_REGISTRY", fake_registry)
     monkeypatch.setattr(agent_service, "MODEL_REGISTRY", fake_registry)
     monkeypatch.setattr(agent_service, "PROVIDER_CONFIG", fake_providers)
+    # ai_search 从 public_service 命名空间读 MODEL_REGISTRY
+    monkeypatch.setattr(public_service, "MODEL_REGISTRY", fake_registry)
     return fake_registry

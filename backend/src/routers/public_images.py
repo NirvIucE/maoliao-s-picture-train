@@ -12,6 +12,7 @@ from src.models.user import User
 from src.routers.users import get_current_user, get_current_user_optional
 from src.schemas.public_image import (
     AddTagsRequest,
+    AISearchRequest,
     PublicImageDetailResponse,
     PublicImageListResponse,
     PublicImageResponse,
@@ -74,6 +75,16 @@ async def pending_list(
 ):
     """待审核列表（管理员）"""
     return public_service.get_pending_public_images(db, skip, limit)
+
+
+@router.post("/ai-search")
+async def ai_search(
+    req: AISearchRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+):
+    """AI 搜索公共图库（语义：标题+标签 / 识图：视觉模型），匿名可用"""
+    return await public_service.ai_search(db, req.query, req.mode, current_user)
 
 
 @router.post("/{public_id}/review")

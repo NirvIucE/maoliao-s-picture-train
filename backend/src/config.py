@@ -62,3 +62,7 @@ def _parse_models() -> list[dict]:
     return models
 
 MODEL_REGISTRY = _parse_models()
+
+# AI 搜索配置
+AI_SEARCH_BATCH_SIZE = int(os.getenv("AI_SEARCH_BATCH_SIZE", "50"))
+AI_SEARCH_VISION_TOP_N = int(os.getenv("AI_SEARCH_VISION_TOP_N", "5"))

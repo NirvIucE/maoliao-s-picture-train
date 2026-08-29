@@ -1,16 +1,21 @@
 """
 公共图库业务逻辑
 """
+import base64
+import json
+import re
 from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from src.config import AI_SEARCH_BATCH_SIZE, AI_SEARCH_VISION_TOP_N, MODEL_REGISTRY
 from src.models.image import Image
 from src.models.public_image import PublicImage
 from src.models.tag import Tag
 from src.models.user import User
+from src.services.agent_service import complete_llm
 from src.services.image_service import get_image_detail
 
 
@@ -125,6 +130,127 @@ def get_public_images(db: Session, user: User | None, skip: int = 0, limit: int 
     rows = query.order_by(PublicImage.created_at.desc()).offset(skip).limit(limit).all()
     items = [_build_item(pi, img, u) for pi, img, u in rows]
     return {"total": total, "items": items}
+
+
+def _pick_model(model_type: str) -> str | None:
+    """从模型注册表选一个指定类型的模型 id（text/vision），无可用返回 None"""
+    for m in MODEL_REGISTRY:
+        if m.get("type") == model_type:
+            model_id = m.get("id")
+            if isinstance(model_id, str):
+                return model_id
+    return None
+
+
+def _parse_id_list(text: str) -> set[int]:
+    """从 AI 返回文本中解析 id 列表（容错：剥离代码块围栏、提取 JSON 数组，非法则空）"""
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        m = re.search(r"\[[^\]]*\]", cleaned)
+        if not m:
+            return set()
+        try:
+            data = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            return set()
+    if not isinstance(data, list):
+        return set()
+
+    def _is_id(x: object) -> bool:
+        return isinstance(x, (int, str)) and str(x).strip().lstrip("-").isdigit()
+
+    return {int(x) for x in data if _is_id(x)}
+
+
+async def _ai_search_semantic(rows, query: str, model_id: str) -> set[int]:
+    """语义通道：候选元数据（id/标题/标签）分批送文本模型，返回匹配的 public_id 集合"""
+    candidates = [
+        {"id": pi.id, "title": img.display_name, "tags": [t.name for t in img.tags]}
+        for pi, img, _ in rows
+    ]
+    matched: set[int] = set()
+    for i in range(0, len(candidates), AI_SEARCH_BATCH_SIZE):
+        batch = candidates[i:i + AI_SEARCH_BATCH_SIZE]
+        prompt = (
+            "你是图片检索助手。下面是公共图库中的图片清单（id, 标题, 标签）。\n"
+            f"用户查询：「{query}」\n"
+            "请根据标题和标签的语义相关性，返回与查询匹配的图片 id 列表。\n"
+            f"清单：{json.dumps(batch, ensure_ascii=False)}\n"
+            "只返回 JSON 数组，例如 [1, 5]。没有匹配返回 []。不要输出其他内容。"
+        )
+        text = await complete_llm(model_id, [{"role": "user", "content": prompt}])
+        matched |= _parse_id_list(text)
+    return matched
+
+
+async def _ai_search_vision(rows, query: str, model_id: str) -> set[int]:
+    """识图通道：对候选图片限量逐张视觉判断"与查询是否相关"，返回匹配的 public_id 集合"""
+    matched: set[int] = set()
+    for pi, img, _ in rows[:AI_SEARCH_VISION_TOP_N]:
+        image_path = img.thumbnail_path or img.file_path
+        if not image_path:
+            continue
+        try:
+            with open(image_path, "rb") as f:
+                data = base64.b64encode(f.read()).decode("utf-8")
+        except OSError:
+            continue
+        text_prompt = f"这张图片与查询「{query}」相关吗？只回答「是」或「否」。"
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": text_prompt},
+                {"type": "image_url", "image_url": {"url": f"data:{img.mime_type};base64,{data}"}},
+            ],
+        }]
+        text = await complete_llm(model_id, messages)
+        if text.strip().startswith("是"):
+            matched.add(pi.id)
+    return matched
+
+
+async def ai_search(db: Session, query: str, mode: str, user: User | None) -> dict:
+    """AI 搜索公共图库：语义通道（标题+标签）或识图通道（视觉模型）
+    - 候选集与列表浏览一致的可见性规则（approved + 角色过滤）
+    - 严格校验 AI 返回的 id 存在且可见（幻觉过滤）
+    - AI 不可用/失败 → 抛出 5xx 友好错误（前端提示后可回退普通搜索）
+    """
+    if not query.strip():
+        raise HTTPException(status_code=400, detail="搜索词不能为空")
+
+    q = (
+        db.query(PublicImage, Image, User)
+        .join(Image, PublicImage.image_id == Image.id)
+        .join(User, PublicImage.user_id == User.id)
+        .filter(PublicImage.status == "approved")
+    )
+    if user is None:
+        q = q.filter(PublicImage.is_visible == True)  # noqa: E712
+    elif user.role != "admin":
+        q = q.filter(or_(PublicImage.is_visible == True, PublicImage.user_id == user.id))  # noqa: E712
+    rows = q.order_by(PublicImage.created_at.desc()).all()
+    if not rows:
+        return {"total": 0, "items": [], "note": "没有可搜索的公共图片"}
+
+    model_id = _pick_model("vision" if mode == "vision" else "text")
+    if model_id is None:
+        raise HTTPException(status_code=503, detail="未配置 AI 模型，无法使用 AI 搜索")
+
+    try:
+        if mode == "vision":
+            matched_ids = await _ai_search_vision(rows, query, model_id)
+        else:
+            matched_ids = await _ai_search_semantic(rows, query, model_id)
+    except HTTPException:
+        raise HTTPException(status_code=502, detail="AI 搜索暂不可用，请稍后重试或使用普通搜索")
+
+    # 幻觉过滤：只保留 AI 返回且仍在候选集中的 id
+    valid_ids = {pi.id for pi, _, _ in rows}
+    matched = [t for t in rows if t[0].id in matched_ids and t[0].id in valid_ids]
+    items = [_build_item(pi, img, u) for pi, img, u in matched]
+    return {"total": len(items), "items": items, "note": None}
 
 
 def get_my_public_images(db: Session, user: User, skip: int = 0, limit: int = 20) -> dict:

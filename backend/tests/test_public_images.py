@@ -11,7 +11,9 @@
 - delete：owner 或 admin 可删 200，他人 403
 """
 
+import httpx
 import pytest
+import respx
 
 
 # ── 辅助 fixtures ──
@@ -420,3 +422,97 @@ class TestTags:
         r = client.get("/api/public/images", params={"search": "#猫"})
         assert r.status_code == 200
         assert approved_public_id in [i["id"] for i in r.json()["items"]]
+
+
+class TestAISearch:
+    """阶段 13：AI 搜索（语义通道 mock / 识图通道 mock / 幻觉过滤 / 降级）"""
+
+    @staticmethod
+    def _mock_text_llm(content: str) -> None:
+        """mock 文本模型（deepseek）返回指定 content（SSE 流格式）"""
+        respx.post("https://api.deepseek.com/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                text=(
+                    f'data: {{"choices":[{{"delta":{{"content":"{content}"}}}}]}}'
+                    "\n\ndata: [DONE]\n\n"
+                ),
+            )
+        )
+
+    @respx.mock
+    def test_semantic_hits_and_hallucination_filtered(
+        self, client, auth_headers, approved_public_id, mock_models
+    ):
+        """语义通道：AI 返回 [approved_id, 9999] → 只返回 approved_id（幻觉 9999 被过滤）"""
+        self._mock_text_llm(f"[{approved_public_id}, 9999]")
+        r = client.post(
+            "/api/public/images/ai-search",
+            headers=auth_headers,
+            json={"query": "猫", "mode": "semantic"},
+        )
+        assert r.status_code == 200
+        ids = [i["id"] for i in r.json()["items"]]
+        assert approved_public_id in ids
+        assert 9999 not in ids
+
+    @respx.mock
+    def test_semantic_invalid_json_returns_empty(
+        self, client, auth_headers, approved_public_id, mock_models
+    ):
+        """AI 返回非法内容 → 空结果（不崩溃）"""
+        self._mock_text_llm("我不太确定")
+        r = client.post(
+            "/api/public/images/ai-search",
+            headers=auth_headers,
+            json={"query": "猫"},
+        )
+        assert r.status_code == 200
+        assert r.json()["total"] == 0
+
+    def test_no_model_returns_503(self, client, auth_headers, approved_public_id, monkeypatch):
+        """无 AI 模型配置 → 503"""
+        monkeypatch.setattr("src.services.public_service.MODEL_REGISTRY", [])
+        r = client.post(
+            "/api/public/images/ai-search",
+            headers=auth_headers,
+            json={"query": "猫"},
+        )
+        assert r.status_code == 503
+
+    def test_empty_query_400(self, client, auth_headers):
+        """空搜索词 → 400"""
+        r = client.post(
+            "/api/public/images/ai-search",
+            headers=auth_headers,
+            json={"query": "  "},
+        )
+        assert r.status_code == 400
+
+    @respx.mock
+    def test_vision_channel_hit(self, client, auth_headers, approved_public_id, mock_models):
+        """识图通道：视觉模型回答"是" → 命中"""
+        respx.post("https://api.siliconflow.cn/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                text='data: {"choices":[{"delta":{"content":"是"}}]}\n\ndata: [DONE]\n\n',
+            )
+        )
+        r = client.post(
+            "/api/public/images/ai-search",
+            headers=auth_headers,
+            json={"query": "猫", "mode": "vision"},
+        )
+        assert r.status_code == 200
+        assert r.json()["total"] >= 1
+
+    @respx.mock
+    def test_anonymous_ai_search(self, client, approved_public_id, mock_models):
+        """匿名用户可用 AI 搜索（无需登录）"""
+        self._mock_text_llm(f"[{approved_public_id}]")
+        r = client.post(
+            "/api/public/images/ai-search",
+            json={"query": "猫"},
+        )
+        assert r.status_code == 200
+        assert r.json()["total"] >= 1
