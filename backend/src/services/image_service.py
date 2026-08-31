@@ -326,7 +326,38 @@ def update_image_name(db: Session, image_id: int, custom_name: str, user: User) 
     return image
 
 IMAGE_EDIT_MODEL = "Qwen/Qwen-Image-Edit-2509"
-async def edit_image_by_ai(db: Session, image_id: int, prompt: str, image_base64: str, user: User, color_name: str = "红色") -> str:
+def _extract_result_image(payload: dict) -> str | None:
+    """
+    从图生图接口响应中解析结果图（兼容多种厂商返回形状）：
+    images[0].url → images[0].b64_json → data[0].b64_json → data[0].url
+    → data_url → 顶层 url → 顶层 b64_json；全部失败返回 None
+    （参考 ai-image-edit 示例项目的多形态解析思路）
+    """
+    if not isinstance(payload, dict):
+        return None
+
+    def _first(items: object, key: str) -> str | None:
+        if isinstance(items, list) and items and isinstance(items[0], dict):
+            value = items[0].get(key)
+            return value if isinstance(value, str) and value else None
+        return None
+
+    for candidate in (
+        _first(payload.get("images"), "url"),
+        _first(payload.get("images"), "b64_json"),
+        _first(payload.get("data"), "b64_json"),
+        _first(payload.get("data"), "url"),
+        payload.get("data_url"),
+        payload.get("url"),
+        payload.get("b64_json"),
+    ):
+        if candidate:
+            return candidate
+    return None
+
+async def edit_image_by_ai(
+    db: Session, image_id: int, prompt: str, image_base64: str, user: User, color_name: str = "红色"
+) -> str:
     """AI 区域编辑：调 SiliconFlow 图生图，返回结果图 base64 data URL"""
     # 校验图片存在（复用现有权限+存在性校验）
     get_image_detail(db, image_id, user)
@@ -335,10 +366,15 @@ async def edit_image_by_ai(db: Session, image_id: int, prompt: str, image_base64
     if not provider or not provider.get("api_key"):
         raise HTTPException(status_code=500, detail="siliconflow 未配置")
 
-    # 组合指令：让模型只改红色涂鸦标记区域
+    # 组合指令：目标区域限定 + 区域外保护 + 边缘融合 + 冲突优先（黑区保护约束）
     full_prompt = (
-        f"图中被{color_name}半透明标记覆盖的区域是唯一需要修改的目标区域。"
-        f"请仅对该区域执行：{prompt}。保持图片其他部分完全不变。"
+        f"图中被{color_name}半透明标记覆盖的区域是唯一可修改的目标区域。"
+        f"请仅对该区域执行以下编辑：{prompt}。\n"
+        f"必须严格遵守：\n"
+        f"1) 标记区域外的所有内容必须保持完全不变，包括但不限于构图、背景、"
+        f"物体位置/轮廓/大小、颜色、光照、阴影、清晰度、对比度、风格、文字水印。\n"
+        f"2) 标记区域的边缘要自然融合，避免改动溢出到区域外。\n"
+        f"3) 如果编辑指令与区域外保持不变冲突，优先保证区域外完全不变。"
     )
 
     async with httpx.AsyncClient(timeout=300.0) as client:
@@ -361,12 +397,19 @@ async def edit_image_by_ai(db: Session, image_id: int, prompt: str, image_base64
             )
 
         data = resp.json()
-        result_url = data["images"][0]["url"]
+        result = _extract_result_image(data)
+        if not result:
+            raise HTTPException(status_code=502, detail="AI 编辑失败：响应中未解析到图片")
 
-        # 下载临时结果并转 base64（URL 会过期，必须立即转存）
-        dl = await client.get(result_url, follow_redirects=True)
-        if dl.status_code != 200:
-            raise HTTPException(status_code=502, detail="下载 AI 结果失败")
-
-        result_base64 = base64.b64encode(dl.content).decode("utf-8")
-        return f"data:image/png;base64,{result_base64}"
+        if result.startswith("data:image/"):
+            # 已是 data URL，直接返回
+            return result
+        if "://" in result:
+            # 是 URL：下载临时结果并转 base64（URL 会过期，必须立即转存）
+            dl = await client.get(result, follow_redirects=True)
+            if dl.status_code != 200:
+                raise HTTPException(status_code=502, detail="下载 AI 结果失败")
+            result_base64 = base64.b64encode(dl.content).decode("utf-8")
+            return f"data:image/png;base64,{result_base64}"
+        # 裸 base64（b64_json 形状）
+        return f"data:image/png;base64,{result}"

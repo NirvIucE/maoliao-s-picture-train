@@ -320,3 +320,84 @@ class TestAIEdit:
             json={"prompt": "换成星空", "image_base64": "data:image/png;base64,iVBORw0KGgo="},
         )
         assert r.status_code == 404
+
+    @respx.mock
+    def test_ai_edit_prompt_has_protection_constraints(
+        self, client, auth_headers, test_image, monkeypatch
+    ):
+        """阶段 15：编辑请求体 prompt 含目标区域/区域外保护/边缘融合/冲突优先 4 类约束"""
+        monkeypatch.setattr(image_service, "PROVIDER_CONFIG", {
+            "siliconflow": {"api_key": "fake-key", "base_url": "https://api.siliconflow.cn/v1"}
+        })
+        result_png = _make_png(color=(0, 255, 0)).getvalue()
+        route = respx.post("https://api.siliconflow.cn/v1/images/generations").mock(
+            return_value=httpx.Response(
+                200, json={"images": [{"url": "https://cdn.example.com/result.png"}]}
+            )
+        )
+        respx.get("https://cdn.example.com/result.png").mock(
+            return_value=httpx.Response(200, content=result_png)
+        )
+        r = client.post(
+            f"/api/images/{test_image}/ai-edit",
+            headers=auth_headers,
+            json={"prompt": "换成星空", "image_base64": "data:image/png;base64,iVBORw0KGgo="},
+        )
+        assert r.status_code == 200
+        content = route.calls.last.request.content.decode("utf-8")
+        assert "唯一可修改" in content  # 目标区域限定
+        assert "完全不变" in content  # 区域外保护
+        assert "自然融合" in content  # 边缘融合
+        assert "优先保证" in content  # 冲突优先
+
+    @respx.mock
+    def test_ai_edit_b64_json_response(self, client, auth_headers, test_image, monkeypatch):
+        """阶段 15：编辑响应为 b64_json 形状 → 200 返回 data URL（兼容解析器）"""
+        monkeypatch.setattr(image_service, "PROVIDER_CONFIG", {
+            "siliconflow": {"api_key": "fake-key", "base_url": "https://api.siliconflow.cn/v1"}
+        })
+        respx.post("https://api.siliconflow.cn/v1/images/generations").mock(
+            return_value=httpx.Response(200, json={"images": [{"b64_json": "aGVsbG8="}]})
+        )
+        r = client.post(
+            f"/api/images/{test_image}/ai-edit",
+            headers=auth_headers,
+            json={"prompt": "换成星空", "image_base64": "data:image/png;base64,iVBORw0KGgo="},
+        )
+        assert r.status_code == 200
+        assert r.json()["image_base64"] == "data:image/png;base64,aGVsbG8="
+
+    @respx.mock
+    def test_ai_edit_no_image_in_response(self, client, auth_headers, test_image, monkeypatch):
+        """阶段 15：编辑响应未含图片 → 502（而非 IndexError）"""
+        monkeypatch.setattr(image_service, "PROVIDER_CONFIG", {
+            "siliconflow": {"api_key": "fake-key", "base_url": "https://api.siliconflow.cn/v1"}
+        })
+        respx.post("https://api.siliconflow.cn/v1/images/generations").mock(
+            return_value=httpx.Response(200, json={"error": "no image"})
+        )
+        r = client.post(
+            f"/api/images/{test_image}/ai-edit",
+            headers=auth_headers,
+            json={"prompt": "换成星空", "image_base64": "data:image/png;base64,iVBORw0KGgo="},
+        )
+        assert r.status_code == 502
+
+
+class TestExtractResultImage:
+    """阶段 15：多形态图片响应解析器（纯函数）"""
+
+    def test_images_url(self):
+        assert image_service._extract_result_image({"images": [{"url": "https://x/y.png"}]}) == "https://x/y.png"
+
+    def test_data_b64_json(self):
+        assert image_service._extract_result_image({"data": [{"b64_json": "abc"}]}) == "abc"
+
+    def test_data_url_shape(self):
+        expected = "data:image/png;base64,abc"
+        assert image_service._extract_result_image({"data_url": expected}) == expected
+
+    def test_invalid_returns_none(self):
+        assert image_service._extract_result_image({"error": "x"}) is None
+        assert image_service._extract_result_image(None) is None
+        assert image_service._extract_result_image({"images": [{"url": ""}]}) is None
