@@ -66,3 +66,9 @@ MODEL_REGISTRY = _parse_models()
 # AI 搜索配置
 AI_SEARCH_BATCH_SIZE = int(os.getenv("AI_SEARCH_BATCH_SIZE", "50"))
 AI_SEARCH_VISION_TOP_N = int(os.getenv("AI_SEARCH_VISION_TOP_N", "5"))
+
+# AI 应用配置（阶段 14：上下文管理 / 成本参数化）
+# 多轮对话上下文上限（估算 token，超出滑动窗口裁剪）
+CHAT_MAX_CONTEXT_TOKENS = int(os.getenv("CHAT_MAX_CONTEXT_TOKENS", "4096"))
+LLM_DEFAULT_TEMPERATURE = float(os.getenv("LLM_DEFAULT_TEMPERATURE", "0.7"))
+LLM_DEFAULT_MAX_TOKENS = int(os.getenv("LLM_DEFAULT_MAX_TOKENS", "1024"))

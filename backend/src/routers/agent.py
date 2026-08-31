@@ -33,7 +33,9 @@ async def analyze_image(
     image = image_service.get_image_detail(db, req.image_id, current_user)
 
     return StreamingResponse(
-        agent_service.analyze_image(image.file_path, image.mime_type, req.model),
+        agent_service.analyze_image(
+            image.file_path, image.mime_type, req.model, req.temperature, req.max_tokens
+        ),
         media_type="text/event-stream",
     )
 
@@ -53,6 +55,6 @@ async def chat(
         if model_info and model_info['type'] != "vision":
             raise HTTPException(status_code=400, detail=f"模型'{req.model}'不是视觉模型")
     return StreamingResponse(
-        agent_service.chat(req.messages, req.model, image),
+        agent_service.chat(req.messages, req.model, image, req.temperature, req.max_tokens),
         media_type="text/event-stream",
     )
