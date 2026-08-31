@@ -11,7 +11,6 @@ const errorMsg = ref("")
 const hasMore = ref(false)
 const searchInput = ref("")
 const aiEnabled = ref(false)
-const aiMode = ref<"semantic" | "vision">("semantic")
 const aiNote = ref("")
 
 function onSearch() {
@@ -31,7 +30,7 @@ function onSearch() {
 }
 
 function onAiToggle() {
-  // 仅切换 AI 开关/模式，不自动搜索；点击"搜索"按钮后执行
+  // 仅切换 AI 开关，不自动搜索；点击"搜索"按钮后执行
   aiNote.value = aiEnabled.value && !searchInput.value.trim() ? "输入搜索词后即可使用 AI 搜索" : ""
 }
 
@@ -57,7 +56,8 @@ async function aiLoad() {
   errorMsg.value = ""
   aiNote.value = ""
   try {
-    const res = await aiSearchPublic(query, aiMode.value)
+    // 识图搜索需逐张上传 AI 判断、耗时过长易超时，暂从前端隐藏，仅保留语义匹配（后端 vision 通道保留，后续可恢复）
+    const res = await aiSearchPublic(query, "semantic")
     items.value = res.items
     total.value = res.total
     hasMore.value = false
@@ -119,10 +119,6 @@ onMounted(() => load())
         <input type="checkbox" v-model="aiEnabled" @change="onAiToggle" />
         <span class="ai-switch-text">AI 搜索</span>
       </label>
-      <select v-if="aiEnabled" v-model="aiMode" class="ai-mode" @change="onAiToggle">
-        <option value="semantic">语义匹配（标题+标签）</option>
-        <option value="vision">识图匹配</option>
-      </select>
     </div>
 
     <p v-if="loading">{{ aiEnabled ? "AI 搜索中..." : "加载中..." }}</p>
@@ -191,14 +187,6 @@ onMounted(() => load())
   font-size: 13px;
   color: #606266;
   user-select: none;
-}
-.ai-mode {
-  padding: 6px 8px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
-  font-size: 13px;
-  color: #606266;
 }
 .grid {
   display: grid;
