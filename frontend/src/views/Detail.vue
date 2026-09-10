@@ -201,6 +201,11 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  // 画布在 v-else-if="image" 分支内，只有 loading=false 后才挂载，
+  // 因此 loadImageToCanvas 内的首次 render() 取不到 canvasRef（画布空白），
+  // 必须等 DOM 更新完再补绘一次，否则要等用户操作触发 watch 才显示
+  await nextTick()
+  render()
 })
 
 // 从 sessionStorage 恢复未完成的 AI 编辑任务
