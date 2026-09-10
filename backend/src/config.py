@@ -72,3 +72,9 @@ AI_SEARCH_VISION_TOP_N = int(os.getenv("AI_SEARCH_VISION_TOP_N", "5"))
 CHAT_MAX_CONTEXT_TOKENS = int(os.getenv("CHAT_MAX_CONTEXT_TOKENS", "4096"))
 LLM_DEFAULT_TEMPERATURE = float(os.getenv("LLM_DEFAULT_TEMPERATURE", "0.7"))
 LLM_DEFAULT_MAX_TOKENS = int(os.getenv("LLM_DEFAULT_MAX_TOKENS", "1024"))
+
+# AI 任务配置（阶段 16：长任务异步化）
+# 同时在跑的任务上限，超出的排队等待（避免无限并发压垮上游模型 API）
+AI_TASK_CONCURRENCY = int(os.getenv("AI_TASK_CONCURRENCY", "3"))
+# 图生图上游超时（秒）
+AI_EDIT_TIMEOUT = float(os.getenv("AI_EDIT_TIMEOUT", "300"))

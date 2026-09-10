@@ -3,6 +3,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { getImageDetail, editImage, replaceImage, uploadImage, aiEditImage, updateImageName, type ImageItem, type EditOperation } from "@/api/images"
+import { getTaskStatus, getTaskResult, cancelAITask } from "@/api/tasks"
 import { removeBackground, type Config } from "@imgly/background-removal"
 
 const route = useRoute()
@@ -54,6 +55,15 @@ const brushColors = [
 const brushWidthMap: Record<string, number> = { small: 80, medium: 40, large: 15 }
 const isDrawing = ref(false)
 let lastPoint = { x: 0, y: 0 }
+
+// AI 编辑任务（阶段 16：提交拿 task_id 后轮询，避免长请求挂住页面）
+const aiTaskId = ref<number | null>(null)
+const aiTaskProgress = ref(0)
+const aiTaskMessage = ref("")
+let aiPollTimer: number | null = null
+const AI_POLL_INTERVAL = 2000   // 轮询间隔 2s
+const AI_TASK_STORAGE = "ai_edit_task_id"        // sessionStorage：刷新后恢复未完成任务
+const AI_TASK_IMAGE_STORAGE = "ai_edit_task_image"
 
 // AI 抠图配置：模型文件本地化，避免首次从境外 CDN 下载卡住
 const removeBgConfig: Config = {
@@ -136,19 +146,23 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   })
 }
 
-// 加载图片到离屏 canvas
-function loadImageToCanvas(url: string) {
-  const img = new Image()
-  img.crossOrigin = "anonymous"
-  img.onload = () => {
-    const c = document.createElement("canvas")
-    c.width = img.naturalWidth
-    c.height = img.naturalHeight
-    c.getContext("2d")!.drawImage(img, 0, 0)
-    sourceCanvas.value = c
-    render()
-  }
-  img.src = url
+// 加载图片到离屏 canvas（返回 Promise：图片真正画上后再继续后续逻辑）
+function loadImageToCanvas(url: string): Promise<void> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.crossOrigin = "anonymous"
+    img.onload = () => {
+      const c = document.createElement("canvas")
+      c.width = img.naturalWidth
+      c.height = img.naturalHeight
+      c.getContext("2d")!.drawImage(img, 0, 0)
+      sourceCanvas.value = c
+      render()
+      resolve()
+    }
+    img.onerror = () => resolve()   // 加载失败也放行，由调用方给提示
+    img.src = url
+  })
 }
 
 // 操作变化时重新渲染
@@ -177,7 +191,9 @@ onMounted(async () => {
   try {
     const id = Number(route.params.id)
     image.value = await getImageDetail(id)
-    loadImageToCanvas(imageUrl.value)
+    await loadImageToCanvas(imageUrl.value)
+    // 刷新后恢复未完成的 AI 编辑任务（轮询续跑，避免"处理中"状态丢失）
+    restoreAITask(id)
   } catch (err: any) {
     errorMsg.value = err.response?.data?.detail || "加载失败"
     // 让用户看到错误信息后再返回图库
@@ -186,6 +202,20 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+// 从 sessionStorage 恢复未完成的 AI 编辑任务
+function restoreAITask(imageId: number) {
+  const savedTaskId = Number(sessionStorage.getItem(AI_TASK_STORAGE))
+  const savedImageId = Number(sessionStorage.getItem(AI_TASK_IMAGE_STORAGE))
+  if (!savedTaskId || savedImageId !== imageId) {
+    if (savedTaskId) clearAITaskSession()   // 不属于当前图片的任务，丢弃
+    return
+  }
+  aiTaskId.value = savedTaskId
+  aiEditing.value = true
+  aiTaskMessage.value = "正在恢复任务状态"
+  aiPollTimer = window.setTimeout(() => pollAITask(savedTaskId), AI_POLL_INTERVAL)
+}
 
 function goBack() {
   router.push("/gallery")
@@ -320,6 +350,88 @@ async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   return await resp.blob()
 }
 
+// ── AI 编辑任务：提交 → 轮询 → 取结果（阶段 16）──
+
+function stopAITaskPolling() {
+  if (aiPollTimer !== null) {
+    clearTimeout(aiPollTimer)
+    aiPollTimer = null
+  }
+}
+
+function saveAITaskSession(taskId: number, imageId: number) {
+  sessionStorage.setItem(AI_TASK_STORAGE, String(taskId))
+  sessionStorage.setItem(AI_TASK_IMAGE_STORAGE, String(imageId))
+}
+
+function clearAITaskSession() {
+  sessionStorage.removeItem(AI_TASK_STORAGE)
+  sessionStorage.removeItem(AI_TASK_IMAGE_STORAGE)
+  aiTaskId.value = null
+}
+
+// 结果 base64 → 画布（替换当前图，后续保存逻辑不变）
+async function applyAIEditResult(imageBase64: string) {
+  const resultBlob = await dataUrlToBlob(imageBase64)
+  const url = URL.createObjectURL(resultBlob)
+  const img = new Image()
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve()
+    img.onerror = () => reject(new Error("加载 AI 编辑结果失败"))
+    img.src = url
+  })
+  const c = document.createElement("canvas")
+  c.width = img.naturalWidth
+  c.height = img.naturalHeight
+  c.getContext("2d")!.drawImage(img, 0, 0)
+  sourceCanvas.value = c
+  operations.value = []
+  aiProcessed.value = true
+  aiResultType.value = "ai-edit"
+  URL.revokeObjectURL(url)
+
+  aiEditMode.value = false
+  aiEditPrompt.value = ""
+  render()
+}
+
+// 轮询任务状态：完成取结果，失败/取消给提示
+async function pollAITask(taskId: number) {
+  try {
+    const task = await getTaskStatus(taskId)
+    aiTaskProgress.value = task.progress
+    aiTaskMessage.value = task.message || ""
+
+    if (task.status === "completed") {
+      stopAITaskPolling()
+      const result = await getTaskResult(taskId)
+      await applyAIEditResult(result.image_base64)
+      clearAITaskSession()
+      successMsg.value = "AI 编辑完成"
+      errorMsg.value = ""
+      aiEditing.value = false
+      return
+    }
+    if (task.status === "failed" || task.status === "cancelled") {
+      stopAITaskPolling()
+      clearAITaskSession()
+      aiEditing.value = false
+      successMsg.value = ""
+      errorMsg.value = task.status === "cancelled"
+        ? "AI 编辑已取消"
+        : "AI 编辑失败：" + (task.error || "未知错误")
+      return
+    }
+    aiPollTimer = window.setTimeout(() => pollAITask(taskId), AI_POLL_INTERVAL)
+  } catch (err: any) {
+    stopAITaskPolling()
+    clearAITaskSession()
+    aiEditing.value = false
+    successMsg.value = ""
+    errorMsg.value = "AI 编辑失败：" + (err?.response?.data?.detail || err?.message || err)
+  }
+}
+
 async function handleAIEdit(){
   if (!image.value || aiEditing.value) return
   const prompt = aiEditPrompt.value.trim()
@@ -327,10 +439,12 @@ async function handleAIEdit(){
   if (!currentImage.value) return
 
   aiEditing.value = true
+  aiTaskProgress.value = 0
+  aiTaskMessage.value = "正在提交任务"
   successMsg.value = ""
   errorMsg.value = ""
   try {
-    // 1. 合成提示图：当前图 + 红色涂鸦标记
+    // 1. 合成提示图：当前图 + 彩色涂鸦标记
     const cur = currentImage.value
     const dc = doodleCanvas.value
     const promptCanvas = document.createElement("canvas")
@@ -342,40 +456,35 @@ async function handleAIEdit(){
 
     const blob = await canvasToBlob(promptCanvas)
     const imageBase64 = await blobToDataUrl(blob)
-    // 2. 调后端 AI 编辑
+    // 2. 提交任务（立即返回 task_id，不再等模型）
     const colorName = brushColors.find(c => c.color === brushColor.value)?.name || "红色"
-    const result = await aiEditImage(image.value.id, prompt, imageBase64, colorName)
-    // 3. 结果 base64 → 图片 → 替换 sourceCanvas
-    const resultBlob = await dataUrlToBlob(result.image_base64)
-    const url = URL.createObjectURL(resultBlob)
-    const img = new Image()
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve()
-      img.onerror = () => reject(new Error("加载 AI 编辑结果失败"))
-      img.src = url
-    })
-    const c = document.createElement("canvas")
-    c.width = img.naturalWidth
-    c.height = img.naturalHeight
-    c.getContext("2d")!.drawImage(img, 0, 0)
-    sourceCanvas.value = c
-    operations.value = []
-    aiProcessed.value = true
-    aiResultType.value = "ai-edit"
-    URL.revokeObjectURL(url)
-    
-    aiEditMode.value = false
-    aiEditPrompt.value = ""
-    render()
-    successMsg.value = "AI 编辑完成"
-    errorMsg.value = ""
+    const task = await aiEditImage(image.value.id, prompt, imageBase64, colorName)
+    // 3. 轮询任务状态
+    aiTaskId.value = task.task_id
+    saveAITaskSession(task.task_id, image.value.id)
+    aiPollTimer = window.setTimeout(() => pollAITask(task.task_id), AI_POLL_INTERVAL)
 
   }catch(err: any){
     errorMsg.value = "AI 编辑失败：" + (err?.response?.data?.detail || err?.message || err)
     successMsg.value = ""
-  }finally{
     aiEditing.value = false
   }
+}
+
+// 取消正在进行的 AI 编辑任务
+async function cancelAITaskEdit(){
+  const taskId = aiTaskId.value
+  if (taskId === null) return
+  try {
+    await cancelAITask(taskId)
+  } catch {
+    // 取消失败（如任务刚好结束）不阻塞：仍然停止本地轮询
+  }
+  stopAITaskPolling()
+  clearAITaskSession()
+  aiEditing.value = false
+  successMsg.value = ""
+  errorMsg.value = "AI 编辑已取消"
 }
 
 // 撤销最后一步
@@ -485,6 +594,7 @@ function clamp(v: number, min: number, max: number) {
 onBeforeUnmount(() => {
   document.removeEventListener("mousemove", onDrag)
   document.removeEventListener("mouseup", stopDrag)
+  stopAITaskPolling()
 })
 
 // 保存
@@ -689,6 +799,15 @@ async function confirmRename() {
                   <button class="tool-btn primary" @click="handleAIEdit" :disabled="aiEditing">
                       {{ aiEditing ? "编辑中..." : "提交编辑" }}
                   </button>
+                  <div v-if="aiEditing" class="ai-task-box">
+                    <div class="ai-task-bar">
+                      <div class="ai-task-bar-inner" :style="{ width: aiTaskProgress + '%' }"></div>
+                    </div>
+                    <div class="ai-task-row">
+                      <span class="ai-task-text">{{ aiTaskMessage || "排队中" }}（{{ aiTaskProgress }}%）</span>
+                      <button class="tool-btn" @click="cancelAITaskEdit">取消编辑</button>
+                    </div>
+                  </div>
                 </div>
                 <p v-if="aiEditMode" class="ops-hint">用鼠标在图片上涂抹要修改的区域（红色标记），再输入指令</p>
                 <h3>图片信息</h3>
@@ -794,6 +913,13 @@ async function confirmRename() {
   font-size: 13px;
   box-sizing: border-box;
 }
+
+/* AI 任务进度（阶段 16：长任务轮询） */
+.ai-task-box { display: flex; flex-direction: column; gap: 6px; }
+.ai-task-bar { height: 6px; background: #f0f0f0; border-radius: 3px; overflow: hidden; }
+.ai-task-bar-inner { height: 100%; background: #409eff; transition: width 0.3s ease; }
+.ai-task-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ai-task-text { font-size: 12px; color: #606266; }
 
 .crop-overlay { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.4); }
 .crop-box { position: absolute; border: 2px dashed #409eff; background: rgba(64, 158, 255, 0.1); cursor: move; }

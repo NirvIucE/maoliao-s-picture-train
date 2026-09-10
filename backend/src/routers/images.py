@@ -13,16 +13,16 @@ from sqlalchemy.orm import Session
 from src.database import get_db
 from src.models.user import User
 from src.routers.users import get_current_user
+from src.schemas.ai_task import AITaskSubmitResponse
 from src.schemas.image import (
     AIEditRequest,
-    AIEditResponse,
     EditImageRequest,
     ImageListResponse,
     ImageResponse,
     ImageUploadResponse,
     UpdateImageNameRequest,
 )
-from src.services import image_service
+from src.services import image_service, task_service
 
 router = APIRouter(prefix="/api/images", tags = ["图片"])
 
@@ -134,16 +134,19 @@ async def replace_image(
     image = image_service.replace_image(db, image_id, file, current_user)
     return _build_upload_response(image)
 
-@router.post("/{image_id}/ai-edit", response_model=AIEditResponse)
+@router.post("/{image_id}/ai-edit", response_model=AITaskSubmitResponse)
 async def ai_edit_image(
     image_id: int,
     req: AIEditRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """AI 区域编辑（涂鸦 + 指令），返回结果图 base64"""
-    result = await image_service.edit_image_by_ai(db, image_id, req.prompt, req.image_base64, current_user, req.color_name)
-    return {"image_base64": result}
+    """AI 区域编辑（涂鸦 + 指令）：提交即返回 task_id，前端轮询 /api/tasks/{task_id} 取状态与结果"""
+    task = task_service.create_ai_edit_task(
+        db, image_id, req.prompt, req.image_base64, current_user, req.color_name
+    )
+    task_service.schedule_ai_edit_task(task.id)
+    return AITaskSubmitResponse(task_id=task.id, status=task.status)
 
 def _build_upload_response(image) -> dict:
     """构建上传响应(含URL)"""

@@ -23,6 +23,7 @@ env/
 uploads/
 *.webp
 git上找到的AI图像编辑纯前端示例项目/
+git上找到的第二个AI项目/
 frontend/public/background-removal/
 
 # 前端

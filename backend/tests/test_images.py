@@ -10,7 +10,7 @@
 - rename 成功 200，空串恢复原名，不存在 404
 - edit（rotate/crop）overwrite 200 同 id，new 200 新 id，不存在 404
 - replace 成功 200，非法格式 400
-- ai-edit 成功 200（respx mock），不存在 404
+- ai-edit 提交 200（返回 task_id），不存在/非本人 404（任务执行见 test_tasks.py）
 """
 
 from io import BytesIO
@@ -18,6 +18,7 @@ from io import BytesIO
 import httpx
 import pytest
 import respx
+from fastapi import HTTPException
 from PIL import Image as PILImage
 
 from src.services import image_service
@@ -284,36 +285,11 @@ class TestReplaceImage:
 
 
 class TestAIEdit:
-    @respx.mock
-    def test_ai_edit_success(self, client, auth_headers, test_image, monkeypatch):
-        """AI 编辑（mock SiliconFlow API）→ 200 + image_base64"""
-        monkeypatch.setattr(image_service, "PROVIDER_CONFIG", {
-            "siliconflow": {"api_key": "fake-key", "base_url": "https://api.siliconflow.cn/v1"}
-        })
-        result_png = _make_png(color=(0, 255, 0)).getvalue()
-        respx.post("https://api.siliconflow.cn/v1/images/generations").mock(
-            return_value=httpx.Response(
-                200,
-                json={"images": [{"url": "https://cdn.example.com/result.png"}]},
-            )
-        )
-        respx.get("https://cdn.example.com/result.png").mock(
-            return_value=httpx.Response(200, content=result_png)
-        )
-        r = client.post(
-            f"/api/images/{test_image}/ai-edit",
-            headers=auth_headers,
-            json={
-                "prompt": "换成星空",
-                "image_base64": "data:image/png;base64,iVBORw0KGgo=",
-                "color_name": "红色",
-            },
-        )
-        assert r.status_code == 200
-        assert r.json()["image_base64"].startswith("data:image/png;base64,")
+    """阶段 16：AI 编辑执行已下沉到 task_service 后台协程，
+    这里只测提交入口的归属校验 + call_image_edit 本身（prompt 约束 / 多形态解析）"""
 
     def test_ai_edit_not_found(self, client, auth_headers):
-        """AI 编辑不存在的图片 → 404（在调 API 前就被 get_image_detail 拦截）"""
+        """AI 编辑不存在的图片 → 404（提交时校验归属）"""
         r = client.post(
             "/api/images/9999/ai-edit",
             headers=auth_headers,
@@ -322,9 +298,7 @@ class TestAIEdit:
         assert r.status_code == 404
 
     @respx.mock
-    def test_ai_edit_prompt_has_protection_constraints(
-        self, client, auth_headers, test_image, monkeypatch
-    ):
+    async def test_prompt_has_protection_constraints(self, monkeypatch):
         """阶段 15：编辑请求体 prompt 含目标区域/区域外保护/边缘融合/冲突优先 4 类约束"""
         monkeypatch.setattr(image_service, "PROVIDER_CONFIG", {
             "siliconflow": {"api_key": "fake-key", "base_url": "https://api.siliconflow.cn/v1"}
@@ -338,12 +312,10 @@ class TestAIEdit:
         respx.get("https://cdn.example.com/result.png").mock(
             return_value=httpx.Response(200, content=result_png)
         )
-        r = client.post(
-            f"/api/images/{test_image}/ai-edit",
-            headers=auth_headers,
-            json={"prompt": "换成星空", "image_base64": "data:image/png;base64,iVBORw0KGgo="},
+        result = await image_service.call_image_edit(
+            "换成星空", "data:image/png;base64,iVBORw0KGgo="
         )
-        assert r.status_code == 200
+        assert result.startswith("data:image/png;base64,")
         content = route.calls.last.request.content.decode("utf-8")
         assert "唯一可修改" in content  # 目标区域限定
         assert "完全不变" in content  # 区域外保护
@@ -351,24 +323,21 @@ class TestAIEdit:
         assert "优先保证" in content  # 冲突优先
 
     @respx.mock
-    def test_ai_edit_b64_json_response(self, client, auth_headers, test_image, monkeypatch):
-        """阶段 15：编辑响应为 b64_json 形状 → 200 返回 data URL（兼容解析器）"""
+    async def test_b64_json_response_shape(self, monkeypatch):
+        """阶段 15：编辑响应为 b64_json 形状 → 返回 data URL（兼容解析器）"""
         monkeypatch.setattr(image_service, "PROVIDER_CONFIG", {
             "siliconflow": {"api_key": "fake-key", "base_url": "https://api.siliconflow.cn/v1"}
         })
         respx.post("https://api.siliconflow.cn/v1/images/generations").mock(
             return_value=httpx.Response(200, json={"images": [{"b64_json": "aGVsbG8="}]})
         )
-        r = client.post(
-            f"/api/images/{test_image}/ai-edit",
-            headers=auth_headers,
-            json={"prompt": "换成星空", "image_base64": "data:image/png;base64,iVBORw0KGgo="},
+        result = await image_service.call_image_edit(
+            "换成星空", "data:image/png;base64,iVBORw0KGgo="
         )
-        assert r.status_code == 200
-        assert r.json()["image_base64"] == "data:image/png;base64,aGVsbG8="
+        assert result == "data:image/png;base64,aGVsbG8="
 
     @respx.mock
-    def test_ai_edit_no_image_in_response(self, client, auth_headers, test_image, monkeypatch):
+    async def test_no_image_in_response_502(self, monkeypatch):
         """阶段 15：编辑响应未含图片 → 502（而非 IndexError）"""
         monkeypatch.setattr(image_service, "PROVIDER_CONFIG", {
             "siliconflow": {"api_key": "fake-key", "base_url": "https://api.siliconflow.cn/v1"}
@@ -376,12 +345,9 @@ class TestAIEdit:
         respx.post("https://api.siliconflow.cn/v1/images/generations").mock(
             return_value=httpx.Response(200, json={"error": "no image"})
         )
-        r = client.post(
-            f"/api/images/{test_image}/ai-edit",
-            headers=auth_headers,
-            json={"prompt": "换成星空", "image_base64": "data:image/png;base64,iVBORw0KGgo="},
-        )
-        assert r.status_code == 502
+        with pytest.raises(HTTPException) as exc:
+            await image_service.call_image_edit("换成星空", "data:image/png;base64,iVBORw0KGgo=")
+        assert exc.value.status_code == 502
 
 
 class TestExtractResultImage:

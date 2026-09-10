@@ -18,6 +18,7 @@ from src.models import user  # noqa: F401
 from src.models import image  # noqa: F401
 from src.models import tag  # noqa: F401
 from src.models import public_image  # noqa: F401
+from src.models import ai_task  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

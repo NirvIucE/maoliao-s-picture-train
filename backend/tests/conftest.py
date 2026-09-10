@@ -39,7 +39,7 @@ test_engine = create_engine(TEST_DATABASE_URL, echo=False)
 
 # ── ④ 建表：先 import routers 触发模型注册，再 create_all（幂等）──
 from src.database import Base, get_db  # noqa: E402
-from src.routers import agent, auth, images, public_images, users  # noqa: E402,F401
+from src.routers import agent, auth, images, public_images, tasks, users  # noqa: E402,F401
 
 Base.metadata.create_all(test_engine)
 
@@ -50,6 +50,7 @@ app.include_router(users.router)
 app.include_router(images.router)
 app.include_router(agent.router)
 app.include_router(public_images.router)
+app.include_router(tasks.router)
 
 @app.get("/health")
 def health():

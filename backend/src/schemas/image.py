@@ -66,10 +66,6 @@ class AIEditRequest(BaseModel):
     image_base64: str # 提示图（原图+涂鸦标记）的 base64 data URL
     color_name: str = "红色"   # 涂鸦标记色，用于拼接 prompt
 
-class AIEditResponse(BaseModel):
-    """AI 区域编辑响应"""
-    image_base64: str    # 结果图的 base64 data URL
-
 class UpdateImageNameRequest(BaseModel):
     """修改图片名称请求"""
     custom_name: str = Field(..., max_length=255, description="新名称，空字符串表示恢复原文件名")

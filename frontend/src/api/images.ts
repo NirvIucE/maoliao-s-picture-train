@@ -1,5 +1,6 @@
 
-import api from "./client";
+import api from "./client"
+import type { AITaskSubmitResponse } from "./tasks";
 
 // interface 定义了每个接口的请求/响应结构，
 // 和 pydantic.BaseModel 是同样的概念——前端也要"校验"数据结构。
@@ -129,12 +130,13 @@ export function replaceImage(imageId: number, file: Blob): Promise<ImageUploadRe
     })
 }
 
-// AI 区域编辑（涂鸦 + 指令），返回结果图 base64, colorName 用于后端拼接 prompt
+// AI 区域编辑（涂鸦 + 指令）：提交后立即返回 task_id，结果由 /api/tasks 轮询获取
+// colorName 用于后端拼接 prompt
 export function aiEditImage(
     imageId: number,
     prompt: string,
     imageBase64: string,
     colorName = "红色"
-): Promise<{image_base64: string}> {
-    return api.post(`/images/${imageId}/ai-edit`, { prompt, image_base64: imageBase64, color_name: colorName }, {timeout: 300000})
+): Promise<AITaskSubmitResponse> {
+    return api.post(`/images/${imageId}/ai-edit`, { prompt, image_base64: imageBase64, color_name: colorName })
 }

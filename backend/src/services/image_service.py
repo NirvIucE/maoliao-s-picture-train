@@ -14,7 +14,7 @@ from PIL import Image as PILImage
 from sqlalchemy.orm import Session
 
 from src.cache import cache_delete_pattern, cache_get, cache_set
-from src.config import PROVIDER_CONFIG
+from src.config import AI_EDIT_TIMEOUT, PROVIDER_CONFIG
 from src.models.image import Image
 from src.models.public_image import PublicImage
 from src.models.user import User
@@ -355,13 +355,12 @@ def _extract_result_image(payload: dict) -> str | None:
             return candidate
     return None
 
-async def edit_image_by_ai(
-    db: Session, image_id: int, prompt: str, image_base64: str, user: User, color_name: str = "红色"
-) -> str:
-    """AI 区域编辑：调 SiliconFlow 图生图，返回结果图 base64 data URL"""
-    # 校验图片存在（复用现有权限+存在性校验）
-    get_image_detail(db, image_id, user)
+async def call_image_edit(prompt: str, image_base64: str, color_name: str = "红色") -> str:
+    """调用硅基流动图生图执行区域编辑，返回结果图 base64 data URL
 
+    阶段 16：本函数由 task_service 的后台协程调用，是纯调用（不做 DB 校验）——
+    图片存在性与归属校验已在「任务创建」时完成，避免长任务期间占用 DB 连接。
+    """
     provider = PROVIDER_CONFIG.get("siliconflow")
     if not provider or not provider.get("api_key"):
         raise HTTPException(status_code=500, detail="siliconflow 未配置")
@@ -377,7 +376,7 @@ async def edit_image_by_ai(
         f"3) 如果编辑指令与区域外保持不变冲突，优先保证区域外完全不变。"
     )
 
-    async with httpx.AsyncClient(timeout=300.0) as client:
+    async with httpx.AsyncClient(timeout=AI_EDIT_TIMEOUT) as client:
         resp = await client.post(
             f"{provider['base_url']}/images/generations",
             headers={

@@ -15,7 +15,8 @@ from fastapi.staticfiles import StaticFiles
 
 from src import cache
 from src.logger import setup_logging, stop_logging
-from src.routers import agent, auth, images, public_images, users
+from src.routers import agent, auth, images, public_images, tasks, users
+from src.services import task_service
 
 # ① 初始化日志（必须在创建 app 之前，让后续启动过程也有日志）
 setup_logging()
@@ -31,6 +32,8 @@ async def lifespan(app: FastAPI):
     logger.info("应用启动")
     # 预热 Redis 连接（7.1 优化项：失败自动降级，不阻塞启动）
     await cache.init_redis()
+    # 回收上次进程遗留的未结束 AI 任务（避免前端永久"处理中"）
+    task_service.recover_stuck_tasks()
     yield
     logger.info("应用关闭，排空日志队列")
     stop_logging()
@@ -92,6 +95,7 @@ app.include_router(users.router)
 app.include_router(images.router)
 app.include_router(agent.router)
 app.include_router(public_images.router)
+app.include_router(tasks.router)
 
 # ④ 全局异常处理器：兜底所有非 HTTPException 的未捕获异常
 # - HTTPException（401/403/404 等）走 FastAPI 默认 handler，不进这里
