@@ -203,3 +203,24 @@ def mock_models(monkeypatch):
     # ai_search 从 public_service 命名空间读 MODEL_REGISTRY
     monkeypatch.setattr(public_service, "MODEL_REGISTRY", fake_registry)
     return fake_registry
+
+
+@pytest.fixture(autouse=True)
+def isolate_uploads(tmp_path, monkeypatch):
+    """隔离文件系统：测试产物一律写入 tmp_path，不碰真实 uploads（阶段 17）
+
+    背景：数据库早已用 cat_pic_test + savepoint 隔离，但磁盘此前没隔离，
+    导致每跑一次测试就往 backend/src/uploads/<日期>/ 堆一批测试图孤儿文件
+    （DB 记录随事务回滚，文件却留在磁盘上，用户看不到也删不掉）。
+
+    这里把三处写盘根路径全部重定向：
+      - image_service.UPLOAD_DIR   （原图 / 缩略图）
+      - auth_service.AVATAR_DIR    （头像）
+      - task_service.TASK_UPLOAD_DIR（AI 编辑提示图 / 结果图）
+    """
+    from src.services import auth_service, image_service, task_service
+
+    root = tmp_path / "uploads"
+    monkeypatch.setattr(image_service, "UPLOAD_DIR", str(root))
+    monkeypatch.setattr(auth_service, "AVATAR_DIR", str(root / "avatars"))
+    monkeypatch.setattr(task_service, "TASK_UPLOAD_DIR", str(root / "ai_tasks"))

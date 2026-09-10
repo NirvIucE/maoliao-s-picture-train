@@ -9,6 +9,7 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from src.cache import cache_get, cache_set
+from src.config import UPLOAD_ROOT
 from src.models.user import User
 from src.schemas.user import UserCreate
 from src.utils.security import (
@@ -20,7 +21,7 @@ from src.utils.security import (
 USER_INFO_TTL = 600 # 用户信息缓存10分钟
 
 # 头像存储目录（位于 uploads 下，通过 /static/uploads/avatars/... 访问）
-AVATAR_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads", "avatars")
+AVATAR_DIR = os.path.join(UPLOAD_ROOT, "avatars")
 # 允许的头像扩展名
 ALLOWED_AVATAR_EXT = {".jpg", ".jpeg", ".png", ".webp"}
 

@@ -78,3 +78,9 @@ LLM_DEFAULT_MAX_TOKENS = int(os.getenv("LLM_DEFAULT_MAX_TOKENS", "1024"))
 AI_TASK_CONCURRENCY = int(os.getenv("AI_TASK_CONCURRENCY", "3"))
 # 图生图上游超时（秒）
 AI_EDIT_TIMEOUT = float(os.getenv("AI_EDIT_TIMEOUT", "300"))
+
+# 文件存储配置（阶段 17：测试环境隔离）
+# 上传文件根目录。默认 src/uploads；测试/E2E 可用 UPLOAD_ROOT 覆盖，
+# 避免测试产物写进真实 uploads（历史问题：pytest/E2E 只隔离了 DB 未隔离磁盘）
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_ROOT = os.getenv("UPLOAD_ROOT") or os.path.join(SRC_DIR, "uploads")

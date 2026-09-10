@@ -14,7 +14,7 @@ from PIL import Image as PILImage
 from sqlalchemy.orm import Session
 
 from src.cache import cache_delete_pattern, cache_get, cache_set
-from src.config import AI_EDIT_TIMEOUT, PROVIDER_CONFIG
+from src.config import AI_EDIT_TIMEOUT, PROVIDER_CONFIG, UPLOAD_ROOT
 from src.models.image import Image
 from src.models.public_image import PublicImage
 from src.models.user import User
@@ -26,7 +26,7 @@ from src.utils.image_utils import (
     validate_image_format,
 )
 
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__),"..", "uploads")
+UPLOAD_DIR = UPLOAD_ROOT
 
 # Content-Type -> 扩展名映射表
 CONTENT_TYPE_MAP = {

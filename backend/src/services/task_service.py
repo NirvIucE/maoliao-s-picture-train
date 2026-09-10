@@ -25,7 +25,7 @@ from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from src.config import AI_TASK_CONCURRENCY
+from src.config import AI_TASK_CONCURRENCY, UPLOAD_ROOT
 from src.database import SessionLocal
 from src.models.ai_task import (
     TASK_ACTIVE_STATUSES,
@@ -42,7 +42,7 @@ from src.services import image_service
 logger = logging.getLogger(__name__)
 
 # 提示图 / 结果图落盘目录（提示图在任务终态后删除，结果图保留供前端取用）
-TASK_UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads", "ai_tasks")
+TASK_UPLOAD_DIR = os.path.join(UPLOAD_ROOT, "ai_tasks")
 
 # 后台协程必须自建会话（请求期会话在响应返回后已关闭/被复用，不能跨请求使用）。
 # 声明为模块级变量供测试注入隔离会话，避免后台写库绕过测试事务隔离。

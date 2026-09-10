@@ -21,6 +21,7 @@ env/
 
 # 上传文件
 uploads/
+e2e-uploads/
 *.webp
 git上找到的AI图像编辑纯前端示例项目/
 git上找到的第二个AI项目/

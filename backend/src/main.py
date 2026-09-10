@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src import cache
+from src.config import UPLOAD_ROOT
 from src.logger import setup_logging, stop_logging
 from src.routers import agent, auth, images, public_images, tasks, users
 from src.services import task_service
@@ -76,7 +77,7 @@ async def request_middleware(request: Request, call_next):
 
 
 # 静态文件服务(提供图片访问)
-uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
+uploads_dir = UPLOAD_ROOT
 os.makedirs(uploads_dir, exist_ok=True)
 app.mount("/static/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
