@@ -3,6 +3,8 @@
 覆盖 cache.py 未覆盖的降级路径（原 65% → 目标 90%+）：
 - _health_check PING 失败 → 标记不可用
 - _health_check 已知不可用 → 跳过重试
+- _health_check 已知可用 → 时间窗内不重复 PING（P1-2）
+- cache_delete_pattern 走 SCAN 游标分批删除，只删匹配 key（P1-1）
 - cache_get/set/delete/delete_pattern 在 Redis 不可用时静默返回
 - cache_get/set/delete/delete_pattern 在操作时 RedisError 被捕获
 - API 层面：Redis 挂了，图片列表仍能从 DB 返回（降级到纯数据库模式）
@@ -10,6 +12,7 @@
 
 import time
 
+import fakeredis.aioredis
 import pytest
 from redis.exceptions import RedisError
 
@@ -24,7 +27,7 @@ class _DeadRedis:
 
 
 class _BrokenRedis:
-    """模拟操作中断开：ping 成功但 get/set/delete/keys 抛 RedisError"""
+    """模拟操作中断开：ping 成功但 get/set/delete/scan_iter 抛 RedisError"""
 
     async def ping(self):
         return True
@@ -38,8 +41,21 @@ class _BrokenRedis:
     async def delete(self, *keys):
         raise RedisError("connection lost during delete")
 
-    async def keys(self, pattern):
-        raise RedisError("connection lost during keys")
+    async def scan_iter(self, match=None, count=None):
+        """scan_iter 是异步生成器：首个 __anext__ 时抛错，被 except RedisError 捕获"""
+        raise RedisError("connection lost during scan")
+        yield  # pragma: no cover
+
+
+class _CountingRedis:
+    """只统计 ping 次数（验证健康检查节流），不参与数据操作"""
+
+    def __init__(self):
+        self.ping_count = 0
+
+    async def ping(self):
+        self.ping_count += 1
+        return True
 
 
 @pytest.fixture(autouse=True)
@@ -127,9 +143,66 @@ class TestCacheDeletePattern:
         await cache.cache_delete_pattern("images:*")
 
     async def test_catches_redis_error(self):
-        """keys() 抛 RedisError → 静默跳过"""
+        """scan_iter() 抛 RedisError → 静默跳过"""
         cache._redis_pool = _BrokenRedis()
         await cache.cache_delete_pattern("images:*")
+
+
+class TestHealthCheckThrottle:
+    """P1-2 治理：已知可用时 30 秒内不重复 PING（原实现每次缓存操作都 PING）"""
+
+    async def test_healthy_state_skips_repeated_ping(self):
+        fake = _CountingRedis()
+        cache._redis_pool = fake
+
+        assert await cache._health_check() is True
+        assert fake.ping_count == 1
+
+        # 窗口内连续调用：不应产生任何额外 PING
+        assert await cache._health_check() is True
+        assert await cache._health_check() is True
+        assert fake.ping_count == 1
+
+        # 窗口过期 → 重新 PING
+        cache._last_ping_time = time.time() - cache.HEALTHY_PING_INTERVAL - 1
+        assert await cache._health_check() is True
+        assert fake.ping_count == 2
+
+
+class TestCacheDeletePatternScan:
+    """P1-1 治理：SCAN 游标遍历替代 KEYS 全库扫描"""
+
+    async def test_deletes_only_matched_keys(self):
+        fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        cache._redis_pool = fake
+        await fake.set("maoliao:images:user:1:a", "1")
+        await fake.set("maoliao:images:user:1:b", "2")
+        await fake.set("maoliao:images:user:2:c", "3")
+        await fake.set("maoliao:other", "4")
+
+        await cache.cache_delete_pattern("images:user:1:*")
+
+        assert sorted(await fake.keys("maoliao:*")) == [
+            "maoliao:images:user:2:c",
+            "maoliao:other",
+        ]
+
+    async def test_batched_delete_flushes_all(self, monkeypatch):
+        """key 数超过 SCAN_BATCH 时分块删除，一块都不漏
+
+        回归保护：早期实现在遍历中删除，哈希表收缩导致游标跳过未返回的 key
+        （本用例实测漏删 images:user:1:2），故删除必须发生在遍历结束之后。
+        """
+        monkeypatch.setattr(cache, "SCAN_BATCH", 2)
+        fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        cache._redis_pool = fake
+        for i in range(5):
+            await fake.set(f"maoliao:images:user:1:{i}", str(i))
+        await fake.set("maoliao:images:user:2:keep", "x")
+
+        await cache.cache_delete_pattern("images:user:1:*")
+
+        assert sorted(await fake.keys("maoliao:*")) == ["maoliao:images:user:2:keep"]
 
 
 class TestAPIFallback:

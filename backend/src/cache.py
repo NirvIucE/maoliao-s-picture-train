@@ -5,10 +5,11 @@ Cache-Aside 模式：
 - 读：先查 Redis → 未命中则查 DB → 写入 Redis
 - 写：更新 DB → 删除 Redis 缓存
 
-Redis 不可用时的降级策略：
-- 首次请求 PING Redis（0.5s 超时）
-- PING 失败 → 标记不可用 → 30 秒内所有请求零开销跳过 Redis
-- 30 秒后自动重试 PING，Redis 恢复即切回缓存模式
+健康检查采用时间窗节流（P1-2）：
+- 状态未知时 PING Redis（0.5s 超时）
+- 已知可用 → 30 秒内不再 PING，直接用缓存
+- PING 失败 → 标记不可用 → 15 秒内所有请求零开销跳过 Redis
+- 窗口过后自动重试 PING，Redis 恢复即切回缓存模式
 """
 
 import json
@@ -30,6 +31,10 @@ _redis_pool: aioredis.Redis | None = None
 _redis_available: bool | None = None   # None=未检查, True=可用, False=不可用
 _last_ping_time: float = 0
 PING_INTERVAL = 15  # Redis 不可用时，每 15 秒重试一次 PING
+HEALTHY_PING_INTERVAL = 30  # Redis 已知可用时，30 秒内不重复 PING（P1-2 治理）
+
+# SCAN 游标遍历的每批条数（P1-1 治理：替代 KEYS 全库扫描）
+SCAN_BATCH = 100
 
 
 async def get_redis() -> aioredis.Redis:
@@ -74,18 +79,22 @@ async def _health_check() -> bool:
     """
     检查 Redis 是否可用。
 
-    策略：
-    - 首次调用：PING 一次（0.5s 超时）
-    - PING 失败 → 标记不可用，30 秒内不再尝试
-    - 30 秒后自动重试，成功则立即恢复
+    策略（时间窗节流，P1-2 治理）：
+    - 状态未知（None）：PING 一次（0.5s 超时）
+    - PING 失败 → 标记不可用，PING_INTERVAL 内直接返回 False
+    - 已知可用 → HEALTHY_PING_INTERVAL 内直接返回 True，不再 PING
+      （原实现每次缓存操作都 PING，等于双倍往返）
+    - 窗口过后自动重试 PING，成功则立即恢复
     """
     global _redis_available, _last_ping_time
 
-    # Redis 已知不可用且未到重试时间 → 直接返回
-    if _redis_available is False and time.time() - _last_ping_time < PING_INTERVAL:
-        return False
+    now = time.time()
+    if _redis_available is not None:
+        interval = HEALTHY_PING_INTERVAL if _redis_available else PING_INTERVAL
+        if now - _last_ping_time < interval:
+            return _redis_available
 
-    _last_ping_time = time.time()
+    _last_ping_time = now
     try:
         r = await get_redis()
         await r.ping()
@@ -149,14 +158,24 @@ async def cache_delete(key: str) -> None:
 
 
 async def cache_delete_pattern(pattern: str) -> None:
-    """按通配符批量删除缓存，Redis 不可用时静默跳过"""
+    """按通配符批量删除缓存，Redis 不可用时静默跳过
+
+    用 SCAN 游标遍历（scan_iter）替代 KEYS：KEYS 是 O(N) 全库扫描，
+    在 Redis 单线程模型下会阻塞所有其它命令（P1-1）。
+
+    注意：必须「先收集完再删」。若在遍历过程中删除，哈希表收缩会让游标
+    跳过尚未返回的 key（实测会漏删），因此删除动作放在遍历结束之后，
+    再按 SCAN_BATCH 分块下发 DEL，避免单条命令参数过多。
+    """
     if not await _health_check():
         return
     try:
         r = await get_redis()
         full_pattern = _cache_key(pattern)
-        keys = await r.keys(full_pattern)
-        if keys:
-            await r.delete(*keys)
+        keys: list[str] = []
+        async for key in r.scan_iter(match=full_pattern, count=SCAN_BATCH):
+            keys.append(key)
+        for i in range(0, len(keys), SCAN_BATCH):
+            await r.delete(*keys[i : i + SCAN_BATCH])
     except RedisError:
         pass

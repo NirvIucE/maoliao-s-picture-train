@@ -16,9 +16,14 @@
 """
 
 import io
+import os
 
 from locust import HttpUser, between, task
 from PIL import Image
+
+# 压测图边长（阶段 18 并发治理：验证大图上传对事件循环的阻塞程度）
+# 默认 100（小图基线）；大图场景用 STRESS_IMG_SIZE=3000 覆盖
+STRESS_IMG_SIZE = int(os.getenv("STRESS_IMG_SIZE", "100"))
 
 
 class WebsiteUser(HttpUser):
@@ -84,13 +89,17 @@ class WebsiteUser(HttpUser):
 
     @task(1)
     def upload_image(self):
-        """上传图片（IO 密集型：文件保存 + 缩略图生成）"""
+        """上传图片（IO 密集 + CPU 密集：文件保存 + 缩略图生成）
+
+        小图（默认 100px）测吞吐；大图（STRESS_IMG_SIZE=3000）用来暴露
+        「缩略图 CPU 阻塞事件循环 → 拖垮其它端点」的 P0-1 问题。
+        """
         buf = io.BytesIO()
-        Image.new("RGB", (100, 100), (255, 0, 0)).save(buf, "PNG")
+        Image.new("RGB", (STRESS_IMG_SIZE, STRESS_IMG_SIZE), (255, 0, 0)).save(buf, "PNG")
         buf.seek(0)
         self.client.post(
             "/api/images/upload",
             headers=self.headers,
             files={"file": ("stress.png", buf, "image/png")},
-            name="/api/images/upload [IO]",
+            name=f"/api/images/upload [{STRESS_IMG_SIZE}px]",
         )

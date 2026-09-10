@@ -38,7 +38,7 @@ async def upload(
     current_user: User = Depends(get_current_user),
 ):
     """上传文件（可选自定义名称）"""
-    image = image_service.upload_file(db, file, current_user, custom_name)
+    image = await image_service.upload_file(db, file, current_user, custom_name)
     return _build_upload_response(image)
 
 @router.post("/upload-url", response_model=ImageUploadResponse)
@@ -117,7 +117,7 @@ async def edit_image(
     current_user: User = Depends(get_current_user),
 ):
     """编辑图片（裁剪/旋转/翻转），支持覆盖或另存"""
-    image = image_service.edit_image(
+    image = await image_service.edit_image(
         db, image_id, req.operations, req.save_mode, req.custom_name, current_user
     )
     return _build_upload_response(image)
@@ -131,7 +131,7 @@ async def replace_image(
     current_user: User = Depends(get_current_user),
 ):
     """用新图片文件覆盖原图（AI 抠图/区域编辑结果）"""
-    image = image_service.replace_image(db, image_id, file, current_user)
+    image = await image_service.replace_image(db, image_id, file, current_user)
     return _build_upload_response(image)
 
 @router.post("/{image_id}/ai-edit", response_model=AITaskSubmitResponse)
