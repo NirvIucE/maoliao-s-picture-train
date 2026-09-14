@@ -189,6 +189,15 @@ def mock_models(monkeypatch):
     fake_registry = [
         {"id": "text-model", "name": "文本模型", "type": "text", "provider": "deepseek"},
         {"id": "vision-model", "name": "视觉模型", "type": "vision", "provider": "siliconflow"},
+        # 阶段 20：标记了 tools 的文本模型，用于验证工具循环路径；
+        # text-model 故意不带该标记，用于验证「未标记 → 不传 tools」的降级路径
+        {
+            "id": "tool-model",
+            "name": "工具模型",
+            "type": "text",
+            "provider": "deepseek",
+            "tools": True,
+        },
     ]
     fake_providers = {
         "deepseek": {"api_key": "fake-key", "base_url": "https://api.deepseek.com/v1"},

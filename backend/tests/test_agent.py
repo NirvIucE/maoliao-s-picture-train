@@ -238,3 +238,51 @@ class TestChatParams:
         body = json.loads(route.calls.last.request.content)
         assert body["messages"][0]["role"] == "system"
         assert "示例" in body["messages"][0]["content"]  # few-shot 格式示例存在
+
+
+class TestToolCallParsing:
+    """阶段 20：工具调用分片的解析（OpenAI 兼容协议里 tool_calls 是分片下发的）"""
+
+    def test_merge_fragments_by_index(self):
+        """id/name 在首片，arguments 分段到达 → 必须按 index 归位并拼接"""
+        acc: dict = {}
+        agent_service._merge_tool_call_delta(acc, [{
+            "index": 0,
+            "id": "call_a",
+            "type": "function",
+            "function": {"name": "search_images", "arguments": ""},
+        }])
+        agent_service._merge_tool_call_delta(
+            acc, [{"index": 0, "function": {"arguments": '{"tag"'}}]
+        )
+        agent_service._merge_tool_call_delta(
+            acc, [{"index": 0, "function": {"arguments": ': "猫猫"}'}}]
+        )
+
+        assert acc[0]["id"] == "call_a"
+        assert acc[0]["function"]["name"] == "search_images"
+        assert acc[0]["function"]["arguments"] == '{"tag": "猫猫"}'
+
+    def test_merge_keeps_parallel_calls_separate(self):
+        """同一条消息里多个工具调用：各占一个槽位，不能互相覆盖"""
+        acc: dict = {}
+        agent_service._merge_tool_call_delta(acc, [
+            {"index": 0, "id": "c0", "function": {"name": "search_images", "arguments": "{}"}},
+            {"index": 1, "id": "c1", "function": {"name": "get_image_info", "arguments": ""}},
+        ])
+        agent_service._merge_tool_call_delta(acc, [
+            {"index": 1, "function": {"arguments": '{"image_id": 7}'}},
+        ])
+
+        assert sorted(acc) == [0, 1]
+        assert acc[1]["function"]["name"] == "get_image_info"
+        assert acc[1]["function"]["arguments"] == '{"image_id": 7}'
+
+    def test_merge_tolerates_missing_fields(self):
+        """厂商实现不统一：缺 index / 缺 function 也不能抛异常"""
+        acc: dict = {}
+        agent_service._merge_tool_call_delta(acc, [{"function": {"name": "search_images"}}])
+        agent_service._merge_tool_call_delta(acc, [{}])
+
+        assert acc[0]["function"]["name"] == "search_images"
+        assert acc[0]["function"]["arguments"] == ""
