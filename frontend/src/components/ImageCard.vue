@@ -7,7 +7,7 @@ import { submitToPublic } from "@/api/public"
 import type { ImageItem } from "@/api/images"
 
 const props = defineProps<{ image: ImageItem }>()
-const emit = defineEmits<{ deleted: [] }>()
+const emit = defineEmits<{ deleted: []; "filter-tag": [tag: string] }>()
 
 const router = useRouter()
 const showConfirm = ref(false)
@@ -100,6 +100,11 @@ async function handleSubmitPublic() {
 function goDetail() {
     router.push(`/detail/${props.image.id}`)
 }
+
+// 阶段 21：点击卡片上的标签 → 交给图库页做筛选（本地筛选，无需请求）
+function filterByTag(tag: string) {
+    emit("filter-tag", tag)
+}
 </script>
 
 <template>
@@ -114,6 +119,15 @@ function goDetail() {
         <div class="card-info">
             <p class="name" :title="image.display_name">
                 {{ image.display_name }}
+            </p>
+            <p v-if="image.tags?.length" class="card-tags" @dblclick.stop>
+              <button
+                v-for="t in image.tags"
+                :key="t"
+                class="card-tag"
+                :title="`筛选标签 #${t}`"
+                @click.stop="filterByTag(t)"
+              >#{{ t }}</button>
             </p>
             <p class="size">
                 {{ (image.file_size / 1024).toFixed(1) }} KB
@@ -186,6 +200,22 @@ function goDetail() {
   color: #909399;
   font-size: 13px;
 }
+.card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 8px 0;
+}
+.card-tag {
+  padding: 1px 6px;
+  background: #ecf5ff;
+  color: #409eff;
+  border: 1px solid #d9ecff;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.card-tag:hover { background: #d9ecff; }
 .actions { 
   display: flex; 
   align-items: center; 

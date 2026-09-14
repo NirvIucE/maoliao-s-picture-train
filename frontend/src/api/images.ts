@@ -17,6 +17,8 @@ export interface ImageItem {
     created_at: string
     thumbnail_url: string | null
     image_url: string | null
+    // 阶段 21：个人标签随列表一起返回（卡片展示 + 点击筛选）
+    tags: string[]
 }
 
 export interface ImageListResponse {
@@ -24,10 +26,15 @@ export interface ImageListResponse {
     items: ImageItem[]
 }
 
-// 详情接口比列表多一个 tags 字段（阶段 19：个人图库标签只在详情返回，
-// 列表不带 tags 是为了避免给 Redis 缓存再加一处失效点）
-export interface ImageDetail extends ImageItem {
-    tags: string[]
+// 阶段 21：当前用户的标签统计（图库筛选条数据源，按使用次数降序）
+export interface ImageTagStat {
+    name: string
+    count: number
+}
+
+export interface ImageTagListResponse {
+    total: number
+    items: ImageTagStat[]
 }
 
 export interface ImageUploadRequest {
@@ -42,15 +49,21 @@ export interface ImageUploadRequest {
     thumbnail_url: string
 }
 
-// 获取图片列表
-export function getImages(skip = 0, limit = 20, search?: string): Promise<ImageListResponse> {
+// 获取图片列表（阶段 21：新增 tag 精确筛选，与 search 同时给出取 AND）
+export function getImages(skip = 0, limit = 20, search?: string, tag?: string): Promise<ImageListResponse> {
     const params: Record<string, any> = { skip, limit }
     if(search) params.search = search
+    if(tag) params.tag = tag
     return api.get("/images", { params: params })
 }
 
+// 获取当前用户的标签统计（阶段 21：图库筛选条）
+export function getImageTags(): Promise<ImageTagListResponse> {
+    return api.get("/images/tags")
+}
+
 // 获取图片详情（含个人图库标签）
-export function getImageDetail(imageId: number): Promise<ImageDetail> {
+export function getImageDetail(imageId: number): Promise<ImageItem> {
     return api.get(`/images/${imageId}`)
 }
 
