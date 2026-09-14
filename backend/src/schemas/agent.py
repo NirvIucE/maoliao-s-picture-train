@@ -24,3 +24,5 @@ class ModelInfo(BaseModel):
     id: str
     name: str
     type: str  # "text" 或 "vision"
+    # 阶段 20：是否支持 function calling（前端据此决定能否使用图库工具）
+    tools: bool = False

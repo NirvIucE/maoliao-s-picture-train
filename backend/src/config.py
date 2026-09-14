@@ -44,6 +44,9 @@ PROVIDER_CONFIG = {
 def _parse_models() -> list[dict]:
     """
     解析 AI_MODELS 环境变量为模型列表
+
+    格式：`id|名称|类型|厂商`，可选第 5 位标记是否支持 function calling：
+    `deepseek-chat|DeepSeek-V3|text|deepseek|tools`
     """
     raw = os.getenv("AI_MODELS", "")
     models = []
@@ -53,11 +56,14 @@ def _parse_models() -> list[dict]:
             continue
         parts = item.split("|")
         if len(parts) >= 4:
+            # 阶段 20：第 5 位 = 是否支持工具调用（缺省 False，宁可降级不可报错）
+            tools_flag = parts[4].strip().lower() if len(parts) >= 5 else ""
             models.append({
                 "id": parts[0],
                 "name": parts[1],
                 "type": parts[2],
                 "provider": parts[3],
+                "tools": tools_flag in ("1", "true", "yes", "tools"),
             })
     return models
 
@@ -78,6 +84,12 @@ LLM_DEFAULT_MAX_TOKENS = int(os.getenv("LLM_DEFAULT_MAX_TOKENS", "1024"))
 AI_TASK_CONCURRENCY = int(os.getenv("AI_TASK_CONCURRENCY", "3"))
 # 图生图上游超时（秒）
 AI_EDIT_TIMEOUT = float(os.getenv("AI_EDIT_TIMEOUT", "300"))
+
+# AI 助手工具调用（阶段 20）
+# 单次对话内最多允许的工具循环步数（防止模型反复调用同一工具而失控）
+AGENT_MAX_TOOL_STEPS = int(os.getenv("AGENT_MAX_TOOL_STEPS", "5"))
+# 工具检索类结果返回条数上限
+AGENT_TOOL_RESULT_LIMIT = int(os.getenv("AGENT_TOOL_RESULT_LIMIT", "10"))
 
 # 文件存储配置（阶段 17：测试环境隔离）
 # 上传文件根目录。默认 src/uploads；测试/E2E 可用 UPLOAD_ROOT 覆盖，

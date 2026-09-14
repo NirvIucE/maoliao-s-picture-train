@@ -8,14 +8,18 @@ from collections.abc import AsyncGenerator
 
 import httpx
 from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
 
 from src.config import (
+    AGENT_MAX_TOOL_STEPS,
     CHAT_MAX_CONTEXT_TOKENS,
     LLM_DEFAULT_MAX_TOKENS,
     LLM_DEFAULT_TEMPERATURE,
     MODEL_REGISTRY,
     PROVIDER_CONFIG,
 )
+from src.models.user import User
+from src.services.agent_tools import TOOL_SCHEMAS, execute_tool
 
 
 def _encode_image(image_path: str) -> str:
@@ -92,6 +96,98 @@ def _trim_context(messages: list[dict], max_tokens: int) -> list[dict]:
     return system_msgs + history + [last]
 
 
+def _merge_tool_call_delta(acc: dict[int, dict], fragments: list[dict]) -> None:
+    """把流式 tool_calls 增量合并进累积表（阶段 20）
+
+    OpenAI 兼容协议里工具调用是**分片**下发的：同一个调用的 id / name 出现在首个分片，
+    `arguments` 则被切成若干段陆续到达，靠 `index` 归位。因此这里按 index 建槽并做字符串拼接，
+    不能简单的「后到的覆盖先到的」。
+    """
+    for frag in fragments:
+        index = frag.get("index", 0)
+        slot = acc.setdefault(
+            index,
+            {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
+        )
+        if frag.get("id"):
+            slot["id"] = frag["id"]
+        func = frag.get("function") or {}
+        if func.get("name"):
+            slot["function"]["name"] += func["name"]
+        if func.get("arguments"):
+            slot["function"]["arguments"] += func["arguments"]
+
+
+async def iter_llm_stream(
+    model_id: str,
+    messages: list[dict],
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    tools: list[dict] | None = None,
+) -> AsyncGenerator[dict, None]:
+    """
+    底层流式调用：查注册表 → POST /v1/chat/completions → 产出**规范化事件**
+
+    - `{"type": "text", "content": str}`：正文增量
+    - `{"type": "tool_calls", "tool_calls": [...]}`：模型请求调用工具（流结束后一次性给出）
+
+    与 `stream_llm` 的分工：本函数不假设调用方只要文本，所以返回结构化事件；
+    `stream_llm` 是它的「只要正文」封装，保持既有 SSE 契约不变。
+    """
+    _, provider = _get_model_config(model_id)
+
+    payload = {
+        "model": model_id,
+        "messages": messages,
+        "stream": True,
+        "temperature": LLM_DEFAULT_TEMPERATURE if temperature is None else temperature,
+        "max_tokens": LLM_DEFAULT_MAX_TOKENS if max_tokens is None else max_tokens,
+    }
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        async with client.stream(
+            "POST",
+            f"{provider['base_url']}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {provider['api_key']}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        ) as response:
+            if response.status_code != 200:
+                error_text = await response.aread()
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"AI 服务返回错误: {response.status_code} - {error_text.decode(errors='ignore')[:200]}",
+                )
+
+            acc: dict[int, dict] = {}
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:]  # 去掉 "data: " 前缀
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                # choices 可能为空列表，故用 `or [{}]` 而非 `get(..., [{}])`
+                delta = (chunk.get("choices") or [{}])[0].get("delta") or {}
+                content = delta.get("content")
+                if content:
+                    yield {"type": "text", "content": content}
+                fragments = delta.get("tool_calls")
+                if fragments:
+                    _merge_tool_call_delta(acc, fragments)
+
+            if acc:
+                yield {"type": "tool_calls", "tool_calls": [acc[i] for i in sorted(acc)]}
+
+
 async def stream_llm(
     model_id: str,
     messages: list[dict],
@@ -104,46 +200,14 @@ async def stream_llm(
     - 发送 POST /v1/chat/completions
     - 逐块 yield SSE 格式的文本
     - temperature/max_tokens 未传时使用全局默认值，调用方可按任务覆盖
+
+    阶段 20：改为 `iter_llm_stream` 的文本封装（工具调用事件在此被丢弃），
+    输出契约与改造前一致——仍为 `data: {"chunk": ...}` 若干行 + 结尾 `data: [DONE]`。
     """
-    _, provider = _get_model_config(model_id)
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        async with client.stream(
-            "POST",
-            f"{provider['base_url']}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {provider['api_key']}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model_id,
-                "messages": messages,
-                "stream": True,
-                "temperature": LLM_DEFAULT_TEMPERATURE if temperature is None else temperature,
-                "max_tokens": LLM_DEFAULT_MAX_TOKENS if max_tokens is None else max_tokens,
-            },
-        ) as response:
-            if response.status_code != 200:
-                error_text = await response.aread()
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"AI 服务返回错误: {response.status_code} - {error_text.decode(errors='ignore')[:200]}",
-                )
-
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    data = line[6:]  # 去掉 "data: " 前缀
-                    if data == "[DONE]":
-                        yield "data: [DONE]\n\n"
-                        break
-                    try:
-                        chunk = json.loads(data)
-                        delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            yield f"data: {json.dumps({'chunk': content}, ensure_ascii=False)}\n\n"
-                    except json.JSONDecodeError:
-                        continue
+    async for event in iter_llm_stream(model_id, messages, temperature, max_tokens):
+        if event["type"] == "text":
+            yield f"data: {json.dumps({'chunk': event['content']}, ensure_ascii=False)}\n\n"
+    yield "data: [DONE]\n\n"
 
 async def complete_llm(model_id: str, messages: list[dict]) -> str:
     """非流式调用：复用 stream_llm 把流收集为完整文本返回（用于 AI 搜索等需要完整结果的场景）"""
@@ -221,6 +285,117 @@ async def chat(
 
     async for chunk in stream_llm(model_id, messages, temperature, max_tokens):
         yield chunk
+
+
+# ── 阶段 20：工具调用循环 ──
+
+AGENT_SYSTEM_PROMPT = """你是「猫里奥云图库」的 AI 助手，帮用户管理他自己的个人图库。
+
+你可以调用以下工具（只有用户的**个人图库**可操作）：
+- search_images：按标签或名称检索用户的个人图库
+- get_image_info：查看某张图片的详情，以及它在公共图库的提交状态
+- submit_to_public：准备「提交到公共图库」。它不会真正提交，需要用户在界面上点确认后才会生效
+
+行为规则：
+1. 用户提到某张具体图片时，先用工具确认，不要凭空猜测图片 id。
+2. 检索不到或候选过多时，如实告知并列出来，请用户补充信息，不要硬猜。
+3. 用户表达「提交到公共图库」的意图时，调用 submit_to_public，然后提醒用户在确认卡片上点击确认。
+4. 工具结果里的 error 字段说明了失败原因，请据此向用户解释，不要用完全相同的参数重复调用。
+5. 用简洁的中文回答，不要输出 JSON、工具名等内部细节。"""
+
+
+def model_supports_tools(model_id: str) -> bool:
+    """该模型是否被标记支持 function calling（未标记视为不支持）"""
+    model = next((m for m in MODEL_REGISTRY if m["id"] == model_id), None)
+    return bool(model and model.get("tools"))
+
+
+def _sse(payload: dict) -> str:
+    """把事件序列化为 SSE 行（与既有 `{"chunk": ...}` 契约并存）"""
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _tool_args_preview(raw_arguments: str) -> object:
+    """给前端展示的工具参数：能解析成 JSON 就给对象，否则原样回字符串"""
+    try:
+        return json.loads(raw_arguments) if raw_arguments.strip() else {}
+    except json.JSONDecodeError:
+        return raw_arguments
+
+
+async def run_tool_loop(
+    messages: list[dict],
+    model_id: str,
+    db: Session,
+    user: User,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+) -> AsyncGenerator[str, None]:
+    """带工具调用的对话循环（阶段 20）
+
+    在**单次 HTTP 请求内**闭环：模型要工具 → 本地执行 → 结果回灌 → 继续生成，
+    前端只看到 SSE 事件与最终文本，不需要理解 OpenAI 的 tool 消息协议。
+
+    上下文只在入口裁剪一次：循环中途裁剪可能丢掉 `assistant(tool_calls)`
+    却留下配对的 `role=tool` 消息，上游会直接报错。
+    """
+    if not any(m.get("role") == "system" for m in messages):
+        messages = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}] + messages
+    messages = _trim_context(messages, CHAT_MAX_CONTEXT_TOKENS)
+
+    cache: dict[str, dict] = {}  # 单轮内相同工具+相同参数只执行一次
+
+    for _ in range(AGENT_MAX_TOOL_STEPS):
+        tool_calls: list[dict] = []
+        async for event in iter_llm_stream(
+            model_id, messages, temperature, max_tokens, TOOL_SCHEMAS
+        ):
+            if event["type"] == "text":
+                yield _sse({"chunk": event["content"]})
+            else:
+                tool_calls = event["tool_calls"]
+
+        if not tool_calls:
+            break
+
+        messages.append({"role": "assistant", "content": None, "tool_calls": tool_calls})
+        for call in tool_calls:
+            func = call.get("function") or {}
+            name = func.get("name", "")
+            raw_arguments = func.get("arguments") or ""
+            preview = _tool_args_preview(raw_arguments)
+            yield _sse({"type": "tool_call", "name": name, "args": preview})
+
+            key = f"{name}:{raw_arguments}"
+            result = cache.get(key)
+            if result is None:
+                result = execute_tool(name, raw_arguments, db, user)
+                cache[key] = result
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": call.get("id") or "",
+                "content": json.dumps(result, ensure_ascii=False),
+            })
+
+            if result.get("requires_confirmation"):
+                # 写操作不在这里执行：只把待确认参数交给前端，由用户点确认后走既有 REST 端点
+                yield _sse({"type": "confirm", "action": name, "payload": result.get("data") or {}})
+            yield _sse({
+                "type": "tool_result",
+                "name": name,
+                "ok": bool(result.get("ok")),
+                "summary": result.get("summary", ""),
+                "data": result.get("data"),
+            })
+    else:
+        # 步数用尽仍未收敛：去掉工具再问一次，强制模型基于已有信息作答
+        async for event in iter_llm_stream(model_id, messages, temperature, max_tokens):
+            if event["type"] == "text":
+                yield _sse({"chunk": event["content"]})
+
+    yield "data: [DONE]\n\n"
+
 
 def get_available_models(type_filter: str | None = None) -> list[dict]:
     """获取可用模型列表，可选按类型筛选（text/vision）"""

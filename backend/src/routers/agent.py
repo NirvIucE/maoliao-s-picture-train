@@ -45,7 +45,12 @@ async def chat(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """AI 对话（流式返回）"""
+    """AI 对话（流式返回）
+
+    阶段 20：若所选模型标记了 tools 支持且本次未带图，走「工具调用循环」
+    （模型可检索个人图库、准备提交公共图库）；否则与改造前完全一致——
+    未标记的模型不传 tools 参数，行为不变。
+    """
     # 前置校验 if 存在 image_id，检查图片存在 + 模型支持视觉
     image = None
     if req.image_id is not None:
@@ -54,6 +59,14 @@ async def chat(
         model_info = next((m for m in MODEL_REGISTRY if m['id'] == req.model), None)
         if model_info and model_info['type'] != "vision":
             raise HTTPException(status_code=400, detail=f"模型'{req.model}'不是视觉模型")
+    else:
+        if agent_service.model_supports_tools(req.model):
+            return StreamingResponse(
+                agent_service.run_tool_loop(
+                    req.messages, req.model, db, current_user, req.temperature, req.max_tokens
+                ),
+                media_type="text/event-stream",
+            )
     return StreamingResponse(
         agent_service.chat(req.messages, req.model, image, req.temperature, req.max_tokens),
         media_type="text/event-stream",
