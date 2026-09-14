@@ -7,13 +7,13 @@ import re
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from src.config import AI_SEARCH_BATCH_SIZE, AI_SEARCH_VISION_TOP_N, MODEL_REGISTRY
 from src.models.image import Image
 from src.models.public_image import PublicImage
-from src.models.tag import Tag
+from src.models.tag import Tag, public_image_tags
 from src.models.user import User
 from src.services.agent_service import complete_llm
 from src.services.image_service import get_image_detail
@@ -72,26 +72,49 @@ def submit_to_public(db: Session, image_id: int, user: User, tags: list[str] | N
     return _build_item(pi, image, user)
 
 
-def get_public_images(db: Session, user: User | None, skip: int = 0, limit: int = 20, search: str | None = None) -> dict:
-    """浏览公共图库（匿名看 approved+visible；管理员看全部 approved；普通用户看 visible + 自己上传的，支持按名称搜索）"""
+def _apply_visibility(query, user: User | None):
+    """公共图库可见性过滤（阶段 22：收敛为单一实现）
+
+    调用前 query 须已限定 `PublicImage.status == "approved"`：
+    - 匿名：只看 is_visible
+    - 普通用户：is_visible 或本人上传的（自己能看到自己提交但未公开的）
+    - admin：不加额外过滤（可见全部已审核）
+
+    阶段 22 前这套规则在 `get_public_images` 与 `ai_search` 里各写了一遍，
+    标签聚合若再写第三遍，改一处漏两处就会越权/泄露，故统一到这里。
+    """
+    if user is None:
+        return query.filter(PublicImage.is_visible == True)  # noqa: E712
+    if user.role != "admin":
+        return query.filter(
+            or_(
+                PublicImage.is_visible == True,  # noqa: E712
+                PublicImage.user_id == user.id,
+            )
+        )
+    return query
+
+
+def get_public_images(
+    db: Session,
+    user: User | None,
+    skip: int = 0,
+    limit: int = 20,
+    search: str | None = None,
+    tag: str | None = None,
+) -> dict:
+    """浏览公共图库（角色感知可见性 + 名称/标签搜索）
+
+    - `search`：#标签 → 严格匹配公开标签；否则按自定义名称模糊匹配
+    - `tag`：按公开标签精确筛选（与 `search` 同时给出取 AND）
+    """
     query = (
         db.query(PublicImage, Image, User)
         .join(Image, PublicImage.image_id == Image.id)
         .join(User, PublicImage.user_id == User.id)
         .filter(PublicImage.status == "approved")
     )
-    if user is None:
-        # 匿名用户：只看 approved + visible
-        query = query.filter(PublicImage.is_visible == True)  # noqa: E712
-    elif user.role != "admin":
-        # 普通用户：看 visible + 自己上传的
-        query = query.filter(
-            or_(
-                PublicImage.is_visible == True,  # noqa: E712
-                PublicImage.user_id == user.id,
-            )
-        )
-    # admin: 看全部 approved（不加额外过滤）
+    query = _apply_visibility(query, user)
     if search:
         if search.startswith("#"):
             # #标签 → 严格匹配标签名（非模糊）：搜 #猫 只命中标签恰好为"猫"的图片
@@ -103,10 +126,38 @@ def get_public_images(db: Session, user: User | None, skip: int = 0, limit: int 
             pattern = f"%{search}%"
             # 普通关键词：只匹配自定义名称（用户要求：不搜原始文件名）
             query = query.filter(Image.custom_name.ilike(pattern))
+    if tag:
+        # 阶段 22：独立标签筛选项，精确匹配公开标签；与 search 同时给出时取 AND
+        query = query.filter(PublicImage.tags.any(Tag.name == tag))
     total = query.count()
     rows = query.order_by(PublicImage.created_at.desc()).offset(skip).limit(limit).all()
     items = [_build_item(pi, img, u) for pi, img, u in rows]
     return {"total": total, "items": items}
+
+
+def get_public_tag_stats(db: Session, user: User | None) -> list[dict]:
+    """公共图库的标签使用统计（阶段 22：筛选条数据源）
+
+    与列表**复用同一套可见性口径**（`_apply_visibility`）：匿名访客的筛选条里
+    不能出现不可见或未审核记录的标签名，否则等于泄露。
+    按使用次数降序、标签名升序；不缓存（结果随角色与可见性变化）。
+    """
+    query = (
+        db.query(Tag.name, func.count(public_image_tags.c.public_image_id).label("count"))
+        .join(public_image_tags, public_image_tags.c.tag_id == Tag.id)
+        .join(PublicImage, PublicImage.id == public_image_tags.c.public_image_id)
+        .filter(PublicImage.status == "approved")
+    )
+    query = _apply_visibility(query, user)
+    rows = (
+        query.group_by(Tag.name)
+        .order_by(
+            func.count(public_image_tags.c.public_image_id).desc(),
+            Tag.name.asc(),
+        )
+        .all()
+    )
+    return [{"name": name, "count": count} for name, count in rows]
 
 
 def _pick_model(model_type: str) -> str | None:
@@ -203,10 +254,8 @@ async def ai_search(db: Session, query: str, mode: str, user: User | None) -> di
         .join(User, PublicImage.user_id == User.id)
         .filter(PublicImage.status == "approved")
     )
-    if user is None:
-        q = q.filter(PublicImage.is_visible == True)  # noqa: E712
-    elif user.role != "admin":
-        q = q.filter(or_(PublicImage.is_visible == True, PublicImage.user_id == user.id))  # noqa: E712
+    # 阶段 22：候选集可见性与列表同源，避免两处规则漂移
+    q = _apply_visibility(q, user)
     rows = q.order_by(PublicImage.created_at.desc()).all()
     if not rows:
         return {"total": 0, "items": [], "note": "没有可搜索的公共图片"}
@@ -265,7 +314,9 @@ def _get_public_record(db: Session, public_id: int) -> PublicImage:
     return pi
 
 
-def review_public_image(db: Session, public_id: int, action: str, comment: str | None, admin: User) -> None:
+def review_public_image(
+    db: Session, public_id: int, action: str, comment: str | None, admin: User
+) -> None:
     """审核（通过/拒绝）"""
     pi = _get_public_record(db, public_id)
     if pi.status != "pending":

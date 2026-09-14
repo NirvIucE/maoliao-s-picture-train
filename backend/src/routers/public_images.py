@@ -17,6 +17,7 @@ from src.schemas.public_image import (
     PublicImageListResponse,
     PublicImageResponse,
     PublicImageSubmitRequest,
+    PublicImageTagListResponse,
     RemoveRequest,
     ReviewRequest,
     SetVisibilityRequest,
@@ -47,12 +48,13 @@ async def submit(
 async def list_public(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
-    search: str | None = Query(None, description="按图片名称搜索"),
+    search: str | None = Query(None, description="按图片名称 / #标签 搜索"),
+    tag: str | None = Query(None, description="按公开标签精确筛选（与 search 同时给出取 AND）"),
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ):
-    """浏览公共图库（匿名看 approved+visible，登录后角色感知过滤，支持按名称搜索）"""
-    return public_service.get_public_images(db, current_user, skip, limit, search)
+    """浏览公共图库（角色感知可见性，支持名称搜索 + 标签筛选）"""
+    return public_service.get_public_images(db, current_user, skip, limit, search, tag)
 
 
 @router.get("/my", response_model=PublicImageListResponse)
@@ -75,6 +77,23 @@ async def pending_list(
 ):
     """待审核列表（管理员）"""
     return public_service.get_pending_public_images(db, skip, limit)
+
+
+@router.get("/tags", response_model=PublicImageTagListResponse)
+async def list_public_tags(
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+):
+    """公共图库的标签统计（阶段 22：筛选条数据源，匿名可用）
+
+    只统计**当前请求者可见**的已审核记录，避免向匿名访客泄露不可见/未审核
+    图片的标签名。
+
+    注意：本路由必须声明在 `/{public_id}` 之前，否则 "tags" 会被当成
+    public_id 解析失败（422）。
+    """
+    items = public_service.get_public_tag_stats(db, current_user)
+    return {"total": len(items), "items": items}
 
 
 @router.post("/ai-search")

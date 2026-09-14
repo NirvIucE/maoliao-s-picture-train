@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from src.schemas.image import ImageTagStat
+
 
 class PublicImageSubmitRequest(BaseModel):
     """提交到公共图库请求（仅从自己图库选图，可选标签）"""
@@ -35,6 +37,16 @@ class PublicImageListResponse(BaseModel):
     """公共图库列表响应"""
     total: int
     items: list[PublicImageResponse]
+
+
+class PublicImageTagListResponse(BaseModel):
+    """公共图库标签统计响应（阶段 22：筛选条数据源）
+
+    复用个人图库的 ImageTagStat（{name, count}）避免同构模型重复定义；
+    统计口径随请求者角色变化（详见 public_service.get_public_tag_stats）。
+    """
+    total: int
+    items: list[ImageTagStat]
 
 
 class ReviewRequest(BaseModel):
