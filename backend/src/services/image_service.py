@@ -11,14 +11,16 @@ import uuid
 import httpx
 from fastapi import HTTPException, UploadFile, status
 from PIL import Image as PILImage
-from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.orm import Session, selectinload
 
 from src.cache import cache_delete_pattern, cache_get, cache_set
 from src.config import AI_EDIT_TIMEOUT, PROVIDER_CONFIG, UPLOAD_ROOT
 from src.models.image import Image
 from src.models.public_image import PublicImage
+from src.models.tag import Tag, image_tags
 from src.models.user import User
-from src.schemas.image import ImageResponse
+from src.schemas.image import ImageDetailResponse, ImageResponse
 from src.services.tag_service import set_tags, tag_names
 from src.utils.image_utils import (
     generate_thumbnail,
@@ -150,15 +152,26 @@ async def upload_from_url(db: Session, url: str, user: User, custom_name: str | 
     FakeUploadFile = type("FakeUploadFile", (), {"file": file_content, "filename": filename})
     return await upload_file(db, FakeUploadFile(), user, custom_name)
 
-async def get_user_images(db: Session, user: User, skip: int = 0, limit: int = 20, search: str | None = None) -> dict:
-    """获取用户的图片列表（分页 + 搜索 + Redis缓存）"""
-    # 只有无搜索、第一页才用缓存（搜索条件变化多，不缓存）
-    if not search and skip == 0:
-        cache_key = f"images:user:{user.id}:page0"
+async def get_user_images(
+    db: Session,
+    user: User,
+    skip: int = 0,
+    limit: int = 20,
+    search: str | None = None,
+    tag: str | None = None,
+) -> dict:
+    """获取用户的图片列表（分页 + 名称搜索 + 标签筛选 + Redis 缓存）
+
+    缓存键写死 `images:user:{id}:page0`，只对应「无任何筛选的首页」这一种结果，
+    因此带 `search` 或 `tag` 时既不读也不写缓存（否则会读到全量结果 / 污染全量结果）。
+    """
+    use_cache = not search and not tag and skip == 0
+    cache_key = f"images:user:{user.id}:page0"
+    if use_cache:
         cached = await cache_get(cache_key)
         if cached:
             # 缓存命中：从 dict 重建 Pydantic 模型
-            cached["items"] = [ImageResponse(**item) for item in cached["items"]]
+            cached["items"] = [ImageDetailResponse(**item) for item in cached["items"]]
             return cached
 
     # 缓存未命中 查数据库
@@ -169,18 +182,48 @@ async def get_user_images(db: Session, user: User, skip: int = 0, limit: int = 2
             (Image.custom_name.ilike(pattern)) |
             (Image.original_name.ilike(pattern))
         )
+    if tag:
+        # 标签为精确匹配（非模糊）：与 search 同时给出时取 AND
+        query = query.filter(Image.tags.any(Tag.name == tag))
 
     total = query.count()
-    images = query.order_by(Image.created_at.desc()).offset(skip).limit(limit).all()
+    # selectinload 预取标签：列表要展示 tags，逐行懒加载会变成 N+1
+    images = (
+        query.options(selectinload(Image.tags))
+        .order_by(Image.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
     # ORM → Pydantic（便于 JSON 序列化存入缓存）
-    items = [ImageResponse.model_validate(img) for img in images]
+    items = [
+        ImageDetailResponse(**ImageResponse.model_validate(img).model_dump(), tags=tag_names(img))
+        for img in images
+    ]
     result = {"total": total, "items": items}
     # 缓存结果（存 model_dump 后的纯 dict）
-    if not search and skip == 0:
+    if use_cache:
         cache_data = {"total": total, "items": [item.model_dump() for item in items]}
         await cache_set(cache_key, cache_data, IMAGE_LIST_TTL)
 
     return result
+
+def get_user_tag_stats(db: Session, user: User) -> list[dict]:
+    """当前用户个人图库的标签使用统计（阶段 21：筛选条数据源）
+
+    tags ⋈ image_tags ⋈ images，只统计本人图片；按使用次数降序、标签名升序。
+    不缓存：结果随标签增删频繁变化，且聚合本身走主键/索引，成本可忽略。
+    """
+    rows = (
+        db.query(Tag.name, func.count(image_tags.c.image_id).label("count"))
+        .join(image_tags, image_tags.c.tag_id == Tag.id)
+        .join(Image, Image.id == image_tags.c.image_id)
+        .filter(Image.user_id == user.id)
+        .group_by(Tag.name)
+        .order_by(func.count(image_tags.c.image_id).desc(), Tag.name.asc())
+        .all()
+    )
+    return [{"name": name, "count": count} for name, count in rows]
 
 def get_image_detail(db: Session, image_id: int, user: User) -> Image:
     """获取单张图片详情"""
@@ -207,6 +250,8 @@ def add_tags_to_image(db: Session, image_id: int, raw_tags: list[str], user: Use
     image = get_image_detail(db, image_id, user)
     set_tags(db, image, raw_tags)
     db.commit()
+    # 阶段 21：列表响应带 tags，改标签后必须清列表缓存，否则图库仍显示旧标签
+    asyncio.create_task(cache_delete_pattern(f"images:user:{user.id}:*"))
     return tag_names(image)
 
 def remove_tag_from_image(db: Session, image_id: int, tag_name: str, user: User) -> None:
@@ -217,6 +262,8 @@ def remove_tag_from_image(db: Session, image_id: int, tag_name: str, user: User)
         raise HTTPException(status_code=404, detail="标签不存在")
     image.tags.remove(tag)
     db.commit()
+    # 阶段 21：同 add_tags_to_image，标签变化后清列表缓存
+    asyncio.create_task(cache_delete_pattern(f"images:user:{user.id}:*"))
 
 def delete_image(db:Session, image_id: int, user: User) -> None:
     """删除图片 (数据库记录 + 物理文件 + 缓存失效)"""

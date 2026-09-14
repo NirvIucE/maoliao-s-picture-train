@@ -20,6 +20,7 @@ from src.schemas.image import (
     ImageDetailResponse,
     ImageListResponse,
     ImageResponse,
+    ImageTagListResponse,
     ImageTagsRequest,
     ImageUploadResponse,
     UpdateImageNameRequest,
@@ -58,11 +59,24 @@ async def list_images(
     skip: int = Query(0,ge = 0),    # 跳过前 N 条记录，ge=0 表示最小值为 0
     limit: int = Query(20, ge = 1, le = 100),    # 最多返回 N 条记录，最小 1，最大 100
     search: str | None = Query(None, description="搜索关键词（匹配图片名称）"),
+    tag: str | None = Query(None, description="按标签精确筛选（与 search 同时给出取 AND）"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取图片列表（支持搜索 + Redis 缓存）"""
-    return await image_service.get_user_images(db, current_user, skip, limit, search)
+    """获取图片列表（支持名称搜索 + 标签筛选 + Redis 缓存）"""
+    return await image_service.get_user_images(db, current_user, skip, limit, search, tag)
+
+@router.get("/tags", response_model=ImageTagListResponse)
+def list_image_tags(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """当前用户个人图库的标签统计（按使用次数降序）
+
+    注意：本路由必须声明在 `/{image_id}` 之前，否则 "tags" 会被当成 image_id 解析失败（422）。
+    """
+    items = image_service.get_user_tag_stats(db, current_user)
+    return {"total": len(items), "items": items}
 
 @router.get("/{image_id}", response_model=ImageDetailResponse)
 def get_image(

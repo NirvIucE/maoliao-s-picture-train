@@ -27,23 +27,34 @@ class ImageResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
-class ImageListResponse(BaseModel):
-    """图片列表响应"""
-    total: int
-    items: list[ImageResponse]
-
 class ImageDetailResponse(ImageResponse):
     """单张图片详情响应（阶段 19：额外带个人标签）
 
-    刻意不把 tags 放进 ImageResponse：列表接口无搜索时走 Redis 缓存
-    `images:user:{id}:page0`，给列表加字段会多出一处必须失效的缓存点。
-    详情接口按需请求（用户打开详情页 / 提交表单时），代价可忽略。
+    阶段 21 起列表项也复用本模型：图库网格要显示标签、并支持点击标签筛选，
+    因此把 tags 一并放进列表响应。随之而来的两处代价已同步处理：
+    ① 标签增删路径补清 `images:user:{id}:*` 缓存；
+    ② 列表查询用 `selectinload(Image.tags)` 预取，避免逐行查标签的 N+1。
     """
     tags: list[str] = []
+
+class ImageListResponse(BaseModel):
+    """图片列表响应（阶段 21：items 与详情同构，含个人标签）"""
+    total: int
+    items: list[ImageDetailResponse]
 
 class ImageTagsRequest(BaseModel):
     """个人图库添加标签请求"""
     tags: list[str]
+
+class ImageTagStat(BaseModel):
+    """单个标签及其使用次数（阶段 21：图库筛选条数据源）"""
+    name: str
+    count: int
+
+class ImageTagListResponse(BaseModel):
+    """当前用户个人图库的标签统计（按使用次数降序）"""
+    total: int
+    items: list[ImageTagStat]
 
 class ImageUploadResponse(BaseModel):
     """上传成功响应"""
