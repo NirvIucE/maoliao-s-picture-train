@@ -4,13 +4,42 @@
 import { ref, nextTick } from "vue"
 import { getAvailableModels, chatStream, type ModelInfo } from "@/api/agent"
 import { uploadImage, type ImageItem } from "@/api/images"
+import { submitToPublic } from "@/api/public"
 import GalleryPicker from "@/views/GalleryPicker.vue"
+
+// 工具调用步骤：把后端事件翻译成用户看得懂的一行（阶段 20）
+interface ToolStep {
+  name: string
+  label: string
+  status: "running" | "done" | "failed"
+  summary: string
+  items: { id: number; display_name: string; thumbnail_url: string }[]
+}
+
+// 待确认的写操作：AI 只准备参数，真正提交由用户点卡片触发
+interface ConfirmCard {
+  action: string
+  imageId: number
+  displayName: string
+  tags: string[]
+  submitting: boolean
+  done: boolean
+  error: string
+}
 
 interface Message {
   role: "user" | "assistant"
   content: string
   imageUrl?: string
   imageName?: string
+  steps?: ToolStep[]
+  confirm?: ConfirmCard
+}
+
+const TOOL_LABELS: Record<string, string> = {
+  search_images: "检索个人图库",
+  get_image_info: "查看图片详情",
+  submit_to_public: "准备提交公共图库",
 }
 
 const models = ref<ModelInfo[]>([])
@@ -140,8 +169,49 @@ async function sendMessage() {
       selectedModel.value,
       imageId
     )
-    for await (const chunk of stream) {
-      messages.value[assistantIndex].content += chunk
+    for await (const event of stream) {
+      const msg = messages.value[assistantIndex]
+      if (event.type === "text") {
+        msg.content += event.content
+      } else if (event.type === "tool_call") {
+        if (!msg.steps) msg.steps = []
+        msg.steps.push({
+          name: event.name,
+          label: TOOL_LABELS[event.name] || event.name,
+          status: "running",
+          summary: "",
+          items: [],
+        })
+      } else if (event.type === "tool_result") {
+        // 同名工具可能连续出现，配对它前面最近一个还在进行中的步骤
+        const step = [...(msg.steps || [])]
+          .reverse()
+          .find((s) => s.name === event.name && s.status === "running")
+        if (step) {
+          step.status = event.ok ? "done" : "failed"
+          step.summary = event.summary
+          if (Array.isArray(event.data)) {
+            // 只有带缩略图的检索结果才需要展示（详情类工具返回的是对象）
+            step.items = event.data
+              .filter((it: any) => it.thumbnail_url)
+              .map((it: any) => ({
+                id: it.id,
+                display_name: it.display_name,
+                thumbnail_url: it.thumbnail_url as string,
+              }))
+          }
+        }
+      } else if (event.type === "confirm") {
+        msg.confirm = {
+          action: event.action,
+          imageId: event.payload.image_id,
+          displayName: event.payload.display_name,
+          tags: event.payload.tags || [],
+          submitting: false,
+          done: false,
+          error: "",
+        }
+      }
       await nextTick()
       // 自动滚到底部
       if (chatContainer.value) {
@@ -152,6 +222,23 @@ async function sendMessage() {
     messages.value[assistantIndex].content = `错误: ${err.message}`
   } finally {
     sending.value = false
+  }
+}
+
+// 用户点确认卡片 —— 真正的写动作在这里发生（走既有 REST 端点，与普通提交面板同一条路径）
+async function confirmSubmit(msg: Message) {
+  const card = msg.confirm
+  if (!card || card.submitting || card.done) return
+  card.submitting = true
+  card.error = ""
+  try {
+    await submitToPublic(card.imageId, card.tags)
+    card.done = true
+    msg.content += `${msg.content ? "\n" : ""}已提交《${card.displayName}》，等待管理员审核。`
+  } catch (err: any) {
+    card.error = err.response?.data?.detail || "提交失败"
+  } finally {
+    card.submitting = false
   }
 }
 
@@ -179,6 +266,7 @@ function clearChat() {
       <div v-if="messages.length === 0" class="empty">
         <p>你好！我是猫里奥 AI 助手。</p>
           <p>可以问我关于图库的问题，或者上传图片让我帮你分析。</p>
+          <p>也可以说「把那张猫猫的图提交到公共图库」，我查好后请你确认。</p>
       </div>
       <div
           v-for="(msg, i) in messages"
@@ -191,7 +279,44 @@ function clearChat() {
             :src="msg.imageUrl"
             class="msg-image" 
           />
-          <div>{{ msg.content }}</div>
+          <!-- 工具调用步骤（阶段 20）：检索到哪些图、查了哪张图 -->
+          <div v-if="msg.steps && msg.steps.length" class="tool-steps">
+            <div v-for="(step, si) in msg.steps" :key="si" class="tool-step">
+              <span class="step-icon">
+                {{ step.status === "running" ? "⏳" : step.status === "done" ? "✓" : "✕" }}
+              </span>
+              <span class="step-label">{{ step.label }}</span>
+              <span v-if="step.summary" class="step-summary">{{ step.summary }}</span>
+              <div v-if="step.items.length" class="step-thumbs">
+                <img
+                  v-for="it in step.items"
+                  :key="it.id"
+                  :src="it.thumbnail_url"
+                  :title="it.display_name"
+                  :alt="it.display_name"
+                />
+              </div>
+            </div>
+          </div>
+          <div v-if="msg.content">{{ msg.content }}</div>
+          <!-- 写操作确认卡片：AI 只负责准备参数，授权由用户点击给出 -->
+          <div v-if="msg.confirm" class="confirm-card">
+            <div class="confirm-title">待确认：提交到公共图库</div>
+            <div class="confirm-row">
+              图片：{{ msg.confirm.displayName }}（#{{ msg.confirm.imageId }}）
+            </div>
+            <div class="confirm-row">
+              标签：{{ msg.confirm.tags.length ? msg.confirm.tags.join("、") : "无" }}
+            </div>
+            <p v-if="msg.confirm.error" class="confirm-error">{{ msg.confirm.error }}</p>
+            <button
+              class="btn-confirm"
+              :disabled="msg.confirm.submitting || msg.confirm.done"
+              @click="confirmSubmit(msg)"
+            >
+              {{ msg.confirm.done ? "已提交" : msg.confirm.submitting ? "提交中..." : "确认提交" }}
+            </button>
+          </div>
         </div>
       </div>
     </div> 
@@ -316,6 +441,68 @@ function clearChat() {
   border-radius: 6px;
   margin-bottom: 8px;
   object-fit: cover;
+}
+/* 工具调用步骤（阶段 20） */
+.tool-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.tool-step {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #606266;
+}
+.step-icon { color: #409eff; }
+.step-label { font-weight: 600; }
+.step-summary { color: #909399; }
+.step-thumbs { display: flex; gap: 6px; }
+.step-thumbs img {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #e4e7ed;
+}
+/* 写操作确认卡片 */
+.confirm-card {
+  margin-top: 8px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #409eff;
+  border-radius: 8px;
+}
+.confirm-title {
+  font-weight: 600;
+  color: #409eff;
+  margin-bottom: 6px;
+}
+.confirm-row {
+  font-size: 13px;
+  color: #606266;
+  line-height: 1.8;
+}
+.confirm-error { color: #f56c6c; font-size: 13px; margin: 6px 0 0; }
+.btn-confirm {
+  margin-top: 10px;
+  padding: 6px 16px;
+  background: #409eff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn-confirm:disabled {
+  background: #ccc;
+  cursor: not-allowed;
 }
 .chat-input-area {
   border-top: 1px solid #e4e7ed;
