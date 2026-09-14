@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { ref } from "vue"
 import { useRouter } from "vue-router"
-import { deleteImage, downloadOriginalImage } from "@/api/images"
+import { deleteImage, downloadOriginalImage, getImageDetail } from "@/api/images"
 import { submitToPublic } from "@/api/public"
 import type { ImageItem } from "@/api/images"
 
@@ -19,6 +19,29 @@ const submitError = ref(false)
 const showTagInput = ref(false)
 const tagInput = ref("")
 const pendingTags = ref<string[]>([])
+// 是否已从个人图库带入标签（仅用于提示文案；带入后用户可自由增删）
+const prefilled = ref(false)
+const loadingTags = ref(false)
+
+// 打开提交面板：先带上该图在个人图库里的标签，用户增删确认后才提交
+// （阶段 19：个人标签与公开标签分离，提交是新写一份公开标签，不回写个人图库）
+async function openSubmit() {
+    showTagInput.value = true
+    submitMsg.value = ""
+    submitError.value = false
+    loadingTags.value = true
+    try {
+        const detail = await getImageDetail(props.image.id)
+        if (!pendingTags.value.length) {
+            pendingTags.value = [...detail.tags]
+        }
+        prefilled.value = detail.tags.length > 0
+    } catch {
+        // 标签是可选项，拉取失败不阻塞提交
+    } finally {
+        loadingTags.value = false
+    }
+}
 
 // 输入时即时剥离前导 #（##猫 → 猫）
 function onTagInput() {
@@ -43,6 +66,7 @@ function cancelSubmit() {
     showTagInput.value = false
     tagInput.value = ""
     pendingTags.value = []
+    prefilled.value = false
 }
 
 async function handleDelete() {
@@ -98,7 +122,7 @@ function goDetail() {
               <button class="btn-download" @click="handleDownload">
                 下载原图
               </button>
-              <button v-if="!showTagInput" class="btn-public" @click="showTagInput = true">
+              <button v-if="!showTagInput" class="btn-public" @click="openSubmit">
                 提交公共库
               </button>
               <div v-else class="tag-submit">
@@ -110,6 +134,8 @@ function goDetail() {
                     <button class="tag-remove" title="移除标签" @click="removePendingTag(t)">×</button>
                   </span>
                 </div>
+                <p v-if="loadingTags" class="tag-hint">正在读取个人图库标签...</p>
+                <p v-else-if="prefilled" class="tag-hint">已带入个人图库标签，可增删后提交</p>
                 <button class="btn-public" @click="handleSubmitPublic">确认提交</button>
                 <button class="btn-cancel" @click="cancelSubmit">取消</button>
               </div>
@@ -239,4 +265,5 @@ function goDetail() {
 .tag-remove { border: none; background: none; color: #909399; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
 .tag-remove:hover { color: #f56c6c; }
 .btn-cancel { padding: 3px 10px; background: #e4e7ed; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.tag-hint { margin: 0; width: 100%; font-size: 12px; color: #909399; }
 </style>

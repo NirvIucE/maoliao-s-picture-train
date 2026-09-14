@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from "vue"
 import { useRoute, useRouter } from "vue-router"
-import { getImageDetail, editImage, replaceImage, uploadImage, aiEditImage, updateImageName, type ImageItem, type EditOperation } from "@/api/images"
+import { getImageDetail, editImage, replaceImage, uploadImage, aiEditImage, updateImageName, addImageTags, removeImageTag, type ImageItem, type EditOperation } from "@/api/images"
 import { getTaskStatus, getTaskResult, cancelAITask } from "@/api/tasks"
 import { removeBackground, type Config } from "@imgly/background-removal"
 
@@ -190,7 +190,9 @@ onMounted(async () => {
   errorMsg.value = ""
   try {
     const id = Number(route.params.id)
-    image.value = await getImageDetail(id)
+    const detail = await getImageDetail(id)
+    image.value = detail
+    tags.value = detail.tags
     await loadImageToCanvas(imageUrl.value)
     // 刷新后恢复未完成的 AI 编辑任务（轮询续跑，避免"处理中"状态丢失）
     restoreAITask(id)
@@ -650,6 +652,7 @@ async function handleSave(mode: "overwrite" | "new") {
       aiProcessed.value = false
       const fresh = await getImageDetail(id)
       image.value = fresh
+      tags.value = fresh.tags
       loadImageToCanvas(`${fresh.image_url}?t=${Date.now()}`)
     }
   } catch (err: any) {
@@ -689,6 +692,56 @@ async function confirmRename() {
     errorMsg.value = err.response?.data?.detail || "修改名称失败"
   } finally {
     renamingSaving.value = false
+  }
+}
+
+// ===== 个人图库标签（阶段 19）=====
+// 只增删个人标签（image_tags）；已提交到公共图库的公开标签在公共库详情页单独维护
+const tags = ref<string[]>([])
+const tagInput = ref("")
+const tagActing = ref(false)
+
+// 输入时即时剥离前导 #（##猫 → 猫）
+function onTagInput() {
+  tagInput.value = tagInput.value.replace(/^#+/, "")
+}
+
+async function handleAddTag() {
+  if (!image.value) return
+  const tag = tagInput.value.trim().replace(/^#+/, "")
+  if (!tag) return
+  tagActing.value = true
+  successMsg.value = ""
+  errorMsg.value = ""
+  try {
+    if (tags.value.includes(tag)) {
+      errorMsg.value = `标签"${tag}"已存在`
+      return
+    }
+    const res = await addImageTags(image.value.id, [tag])
+    tagInput.value = ""
+    tags.value = res.tags
+    successMsg.value = `已添加标签 #${tag}`
+  } catch (err: any) {
+    errorMsg.value = err.response?.data?.detail || "添加标签失败"
+  } finally {
+    tagActing.value = false
+  }
+}
+
+async function handleRemoveTag(tagName: string) {
+  if (!image.value) return
+  tagActing.value = true
+  successMsg.value = ""
+  errorMsg.value = ""
+  try {
+    await removeImageTag(image.value.id, tagName)
+    tags.value = tags.value.filter((t) => t !== tagName)
+    successMsg.value = "标签已删除"
+  } catch (err: any) {
+    errorMsg.value = err.response?.data?.detail || "删除标签失败"
+  } finally {
+    tagActing.value = false
   }
 }
 </script>
@@ -833,6 +886,21 @@ async function confirmRename() {
                     <li>尺寸：{{ image.width }} × {{ image.height }}</li>
                     <li>大小：{{ (image.file_size / 1024).toFixed(1) }} KB</li>
                     <li>上传时间：{{ new Date(image.created_at).toLocaleString() }}</li>
+                    <li class="tags-row">
+                        <div class="tag-list">
+                            <span v-for="tag in tags" :key="tag" class="tag-chip">
+                                #{{ tag }}
+                                <button class="tag-remove" :disabled="tagActing" title="删除标签" @click="handleRemoveTag(tag)">×</button>
+                            </span>
+                            <span v-if="!tags.length" class="tag-empty">暂无个人标签（打上标签后，提交公共库时可一键带入）</span>
+                        </div>
+                        <div class="tag-add">
+                            <input v-model="tagInput" placeholder="输入标签后回车添加，无需 # 前缀" @input="onTagInput" @keyup.enter="handleAddTag" />
+                            <button class="tool-btn" :disabled="tagActing || !tagInput.trim()" @click="handleAddTag">
+                                {{ tagActing ? "处理中..." : "添加标签" }}
+                            </button>
+                        </div>
+                    </li>
                 </ul>
             </div>
         </div>
@@ -962,6 +1030,27 @@ async function confirmRename() {
 .name-text { flex: 1; word-break: break-all; }
 .rename-btn { padding: 2px 8px; font-size: 12px; flex-shrink: 0; }
 .rename-input { flex: 1; min-width: 100px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; box-sizing: border-box; }
+
+/* 个人标签（阶段 19）：与公共库详情页保持一致的 chip 交互 */
+.tags-row { display: flex; flex-direction: column; gap: 8px; }
+.tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #ecf5ff;
+  color: #409eff;
+  border: 1px solid #d9ecff;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.tag-remove { border: none; background: none; color: #909399; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
+.tag-remove:hover { color: #f56c6c; }
+.tag-remove:disabled { cursor: not-allowed; }
+.tag-empty { color: #c0c4cc; font-size: 12px; }
+.tag-add { display: flex; align-items: center; gap: 8px; }
+.tag-add input { flex: 1; min-width: 120px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; box-sizing: border-box; }
 
 .detail-footer { margin-top: 20px; text-align: right; }
 .btn-save { padding: 10px 28px; background: #409eff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; }

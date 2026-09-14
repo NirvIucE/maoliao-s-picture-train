@@ -424,6 +424,138 @@ class TestTags:
         assert approved_public_id in [i["id"] for i in r.json()["items"]]
 
 
+class TestTagIsolation:
+    """阶段 19：个人图库标签（image_tags）与公共图库标签（public_image_tags）两层分离
+
+    隔离要守住两件事：① 隐私不外泄——个人图库的私人归类不会出现在公共图库；
+    ② 语义不耦合——两边各自增删标签互不影响。
+    """
+
+    def test_submit_writes_only_public_tags(
+        self, client, auth_headers, test_image
+    ):
+        """提交携带标签 → 只写公开标签；个人图库标签保持原样（不自动带入）"""
+        client.post(f"/api/images/{test_image}/tags", headers=auth_headers, json={"tags": ["私人"]})
+        r = client.post(
+            "/api/public/images",
+            headers=auth_headers,
+            json={"image_id": test_image, "tags": ["公开"]},
+        )
+        assert r.status_code == 200
+        assert r.json()["tags"] == ["公开"]
+        detail = client.get(f"/api/images/{test_image}", headers=auth_headers)
+        assert detail.json()["tags"] == ["私人"]
+
+    def test_public_add_tags_does_not_affect_personal(
+        self, client, auth_headers, pending_public_id, test_image
+    ):
+        """给公共记录加标签 → 个人图库该图标签不受影响"""
+        client.post(
+            f"/api/public/images/{pending_public_id}/tags",
+            headers=auth_headers,
+            json={"tags": ["公开"]},
+        )
+        r = client.get(f"/api/images/{test_image}", headers=auth_headers)
+        assert r.json()["tags"] == []
+
+    def test_personal_add_tags_does_not_affect_public(
+        self, client, auth_headers, pending_public_id, test_image
+    ):
+        """给个人图库加标签 → 已提交的公开记录标签不受影响"""
+        client.post(
+            f"/api/public/images/{pending_public_id}/tags",
+            headers=auth_headers,
+            json={"tags": ["公开"]},
+        )
+        client.post(f"/api/images/{test_image}/tags", headers=auth_headers, json={"tags": ["私人"]})
+        r = client.get(f"/api/public/images/{pending_public_id}", headers=auth_headers)
+        assert r.json()["tags"] == ["公开"]
+
+    def test_personal_remove_tag_does_not_affect_public(
+        self, client, auth_headers, pending_public_id, test_image
+    ):
+        """删个人标签 → 公开标签仍在（反向也不同步）"""
+        client.post(
+            f"/api/public/images/{pending_public_id}/tags",
+            headers=auth_headers,
+            json={"tags": ["猫"]},
+        )
+        client.post(f"/api/images/{test_image}/tags", headers=auth_headers, json={"tags": ["猫"]})
+        assert client.delete(
+            f"/api/images/{test_image}/tags/猫", headers=auth_headers
+        ).status_code == 200
+        r = client.get(f"/api/public/images/{pending_public_id}", headers=auth_headers)
+        assert r.json()["tags"] == ["猫"]
+
+    def test_public_remove_tag_does_not_affect_personal(
+        self, client, auth_headers, pending_public_id, test_image
+    ):
+        """删公开标签 → 个人标签仍在（隐私保护的核心收益：不会连带删掉私人归类）"""
+        client.post(
+            f"/api/public/images/{pending_public_id}/tags",
+            headers=auth_headers,
+            json={"tags": ["猫"]},
+        )
+        client.post(f"/api/images/{test_image}/tags", headers=auth_headers, json={"tags": ["猫"]})
+        assert client.delete(
+            f"/api/public/images/{pending_public_id}/tags/猫", headers=auth_headers
+        ).status_code == 200
+        r = client.get(f"/api/images/{test_image}", headers=auth_headers)
+        assert r.json()["tags"] == ["猫"]
+
+    def test_personal_only_tag_not_searchable_in_public(
+        self, client, auth_headers, other_user_headers, approved_public_id, test_image
+    ):
+        """只在个人图库打的标签，公共图库 #标签 搜索搜不到（隐私外泄防线）"""
+        client.post(
+            f"/api/images/{test_image}/tags", headers=auth_headers, json={"tags": ["身份证"]}
+        )
+        r = client.get(
+            "/api/public/images",
+            headers=other_user_headers,
+            params={"search": "#身份证"},
+        )
+        assert r.status_code == 200
+        assert approved_public_id not in [i["id"] for i in r.json()["items"]]
+
+    def test_resubmit_after_delete_is_independent(
+        self, client, auth_headers, pending_public_id, test_image
+    ):
+        """删除公共记录后重新提交 → 新记录的公开标签独立，且仍不写个人标签"""
+        client.post(
+            f"/api/public/images/{pending_public_id}/tags",
+            headers=auth_headers,
+            json={"tags": ["旧标签"]},
+        )
+        assert client.delete(
+            f"/api/public/images/{pending_public_id}", headers=auth_headers
+        ).status_code == 200
+        r = client.post(
+            "/api/public/images",
+            headers=auth_headers,
+            json={"image_id": test_image, "tags": ["新标签"]},
+        )
+        assert r.status_code == 200
+        assert r.json()["tags"] == ["新标签"]
+        detail = client.get(f"/api/images/{test_image}", headers=auth_headers)
+        assert detail.json()["tags"] == []
+
+    def test_public_tags_validation_400(self, client, auth_headers, pending_public_id):
+        """公共图库标签同样受 D4 校验约束（超长 / 超数量 → 400）"""
+        r = client.post(
+            f"/api/public/images/{pending_public_id}/tags",
+            headers=auth_headers,
+            json={"tags": ["猫" * 51]},
+        )
+        assert r.status_code == 400
+        r2 = client.post(
+            f"/api/public/images/{pending_public_id}/tags",
+            headers=auth_headers,
+            json={"tags": [f"标签{i}" for i in range(21)]},
+        )
+        assert r2.status_code == 400
+
+
 class TestAISearch:
     """阶段 13：AI 搜索（语义通道 mock / 识图通道 mock / 幻觉过滤 / 降级）"""
 

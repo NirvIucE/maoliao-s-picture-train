@@ -24,6 +24,12 @@ export interface ImageListResponse {
     items: ImageItem[]
 }
 
+// 详情接口比列表多一个 tags 字段（阶段 19：个人图库标签只在详情返回，
+// 列表不带 tags 是为了避免给 Redis 缓存再加一处失效点）
+export interface ImageDetail extends ImageItem {
+    tags: string[]
+}
+
 export interface ImageUploadRequest {
     id: number
     original_name: string
@@ -43,8 +49,8 @@ export function getImages(skip = 0, limit = 20, search?: string): Promise<ImageL
     return api.get("/images", { params: params })
 }
 
-// 获取图片详情
-export function getImageDetail(imageId: number): Promise<ImageItem> {
+// 获取图片详情（含个人图库标签）
+export function getImageDetail(imageId: number): Promise<ImageDetail> {
     return api.get(`/images/${imageId}`)
 }
 
@@ -73,6 +79,16 @@ export function deleteImage(imageId: number): Promise<{ message: string }> {
 // 修改图片名称
 export function updateImageName(imageId: number, customName: string): Promise<ImageItem> {
     return api.patch(`/images/${imageId}/name`, { custom_name: customName })
+}
+
+// 添加个人图库标签（阶段 19：只影响个人标签，已提交的公开标签不受影响）
+export function addImageTags(imageId: number, tags: string[]): Promise<{ message: string; tags: string[] }> {
+    return api.post(`/images/${imageId}/tags`, { tags })
+}
+
+// 移除个人图库标签
+export function removeImageTag(imageId: number, tagName: string): Promise<{ message: string }> {
+    return api.delete(`/images/${imageId}/tags/${encodeURIComponent(tagName)}`)
 }
 
 // 下载原图URL（直接打开即可触发浏览器下载）

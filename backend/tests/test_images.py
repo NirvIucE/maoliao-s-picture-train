@@ -180,6 +180,112 @@ class TestGetImageDetail:
         assert r.status_code == 404
 
 
+class TestImageTags:
+    """阶段 19：个人图库标签 API（增 / 删 / 详情返回 / 权限 / 规范化 / 校验）"""
+
+    def test_add_tags_owner(self, client, auth_headers, test_image):
+        """owner 加标签 → 200 + 返回当前全部标签"""
+        r = client.post(
+            f"/api/images/{test_image}/tags",
+            headers=auth_headers,
+            json={"tags": ["猫", "#风景"]},
+        )
+        assert r.status_code == 200
+        assert r.json()["tags"] == ["猫", "风景"]
+
+    def test_add_tags_normalize_and_dedupe(self, client, auth_headers, test_image):
+        """规范化：去 # 前缀 / 去首尾空白 / 去空 / 去重（保序）"""
+        r = client.post(
+            f"/api/images/{test_image}/tags",
+            headers=auth_headers,
+            json={"tags": [" 猫 ", "#猫", "", "  ", "风景"]},
+        )
+        assert r.status_code == 200
+        assert r.json()["tags"] == ["猫", "风景"]
+
+    def test_add_tags_idempotent(self, client, auth_headers, test_image):
+        """重复提交同一标签 → 幂等，不产生重复项"""
+        client.post(f"/api/images/{test_image}/tags", headers=auth_headers, json={"tags": ["猫"]})
+        r = client.post(
+            f"/api/images/{test_image}/tags", headers=auth_headers, json={"tags": ["猫"]}
+        )
+        assert r.status_code == 200
+        assert r.json()["tags"] == ["猫"]
+
+    def test_detail_returns_tags(self, client, auth_headers, test_image):
+        """详情接口返回个人标签（阶段 19 新增字段）"""
+        client.post(f"/api/images/{test_image}/tags", headers=auth_headers, json={"tags": ["猫"]})
+        r = client.get(f"/api/images/{test_image}", headers=auth_headers)
+        assert r.status_code == 200
+        assert r.json()["tags"] == ["猫"]
+
+    def test_detail_without_tags(self, client, auth_headers, test_image):
+        """无标签 → tags 为空列表（而非缺字段）"""
+        r = client.get(f"/api/images/{test_image}", headers=auth_headers)
+        assert r.json()["tags"] == []
+
+    def test_list_does_not_include_tags(self, client, auth_headers, test_image):
+        """列表接口保持 ImageResponse（无 tags）：列表走 Redis 缓存，不加字段"""
+        client.post(f"/api/images/{test_image}/tags", headers=auth_headers, json={"tags": ["猫"]})
+        r = client.get("/api/images", headers=auth_headers)
+        assert r.status_code == 200
+        assert "tags" not in r.json()["items"][0]
+
+    def test_remove_tag_owner(self, client, auth_headers, test_image):
+        """owner 删标签 → 200；重复删 → 404"""
+        client.post(f"/api/images/{test_image}/tags", headers=auth_headers, json={"tags": ["猫"]})
+        r = client.delete(f"/api/images/{test_image}/tags/猫", headers=auth_headers)
+        assert r.status_code == 200
+        r2 = client.delete(f"/api/images/{test_image}/tags/猫", headers=auth_headers)
+        assert r2.status_code == 404
+
+    def test_remove_nonexistent_tag(self, client, auth_headers, test_image):
+        """删不存在的标签 → 404"""
+        r = client.delete(f"/api/images/{test_image}/tags/不存在", headers=auth_headers)
+        assert r.status_code == 404
+
+    def test_add_tags_other_user_404(self, client, other_user_headers, test_image):
+        """bob 给 alice 的图打标签 → 404（个人图库严格按所有权隔离）"""
+        r = client.post(
+            f"/api/images/{test_image}/tags",
+            headers=other_user_headers,
+            json={"tags": ["x"]},
+        )
+        assert r.status_code == 404
+
+    def test_remove_tag_other_user_404(self, client, other_user_headers, test_image):
+        """bob 删 alice 的标签 → 404"""
+        r = client.delete(f"/api/images/{test_image}/tags/猫", headers=other_user_headers)
+        assert r.status_code == 404
+
+    def test_tag_too_long_400(self, client, auth_headers, test_image):
+        """单标签 > 50 字 → 400（在入口拦截，不让 DB 抛 IntegrityError 变 500）"""
+        r = client.post(
+            f"/api/images/{test_image}/tags",
+            headers=auth_headers,
+            json={"tags": ["猫" * 51]},
+        )
+        assert r.status_code == 400
+
+    def test_tag_length_boundary_ok(self, client, auth_headers, test_image):
+        """边界：恰好 50 字合法"""
+        r = client.post(
+            f"/api/images/{test_image}/tags",
+            headers=auth_headers,
+            json={"tags": ["猫" * 50]},
+        )
+        assert r.status_code == 200
+
+    def test_too_many_tags_400(self, client, auth_headers, test_image):
+        """一次提交 > 20 个标签 → 400"""
+        r = client.post(
+            f"/api/images/{test_image}/tags",
+            headers=auth_headers,
+            json={"tags": [f"标签{i}" for i in range(21)]},
+        )
+        assert r.status_code == 400
+
+
 class TestDownloadImage:
     def test_download_success(self, client, auth_headers, test_image):
         """下载原图 → 200 + octet-stream"""
