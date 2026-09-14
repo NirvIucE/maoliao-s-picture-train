@@ -19,6 +19,7 @@ from src.models.image import Image
 from src.models.public_image import PublicImage
 from src.models.user import User
 from src.schemas.image import ImageResponse
+from src.services.tag_service import set_tags, tag_names
 from src.utils.image_utils import (
     generate_thumbnail,
     get_date_upload_dir,
@@ -187,6 +188,35 @@ def get_image_detail(db: Session, image_id: int, user: User) -> Image:
     if not image:
         raise HTTPException(status_code=404, detail="图片不存在")
     return image
+
+def get_image_detail_response(db: Session, image_id: int, user: User) -> dict:
+    """图片详情响应（含个人标签，阶段 19）
+
+    `get_image_detail` 保持返回 ORM 对象（下载接口要用 file_path），
+    这里额外拼上标签名列表供详情接口序列化。
+    """
+    image = get_image_detail(db, image_id, user)
+    return {**ImageResponse.model_validate(image).model_dump(), "tags": tag_names(image)}
+
+def add_tags_to_image(db: Session, image_id: int, raw_tags: list[str], user: User) -> list[str]:
+    """给个人图库图片添加标签（仅本人），返回该图片当前全部个人标签
+
+    阶段 19：只写个人标签（image_tags）。已提交到公共图库的公开标签
+    （public_image_tags）不受影响，用户的私人归类不会外泄。
+    """
+    image = get_image_detail(db, image_id, user)
+    set_tags(db, image, raw_tags)
+    db.commit()
+    return tag_names(image)
+
+def remove_tag_from_image(db: Session, image_id: int, tag_name: str, user: User) -> None:
+    """从个人图库图片移除标签（仅本人），只影响个人标签"""
+    image = get_image_detail(db, image_id, user)
+    tag = next((t for t in image.tags if t.name == tag_name), None)
+    if tag is None:
+        raise HTTPException(status_code=404, detail="标签不存在")
+    image.tags.remove(tag)
+    db.commit()
 
 def delete_image(db:Session, image_id: int, user: User) -> None:
     """删除图片 (数据库记录 + 物理文件 + 缓存失效)"""

@@ -32,6 +32,19 @@ class ImageListResponse(BaseModel):
     total: int
     items: list[ImageResponse]
 
+class ImageDetailResponse(ImageResponse):
+    """单张图片详情响应（阶段 19：额外带个人标签）
+
+    刻意不把 tags 放进 ImageResponse：列表接口无搜索时走 Redis 缓存
+    `images:user:{id}:page0`，给列表加字段会多出一处必须失效的缓存点。
+    详情接口按需请求（用户打开详情页 / 提交表单时），代价可忽略。
+    """
+    tags: list[str] = []
+
+class ImageTagsRequest(BaseModel):
+    """个人图库添加标签请求"""
+    tags: list[str]
+
 class ImageUploadResponse(BaseModel):
     """上传成功响应"""
     id: int

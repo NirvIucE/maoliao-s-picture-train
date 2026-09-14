@@ -17,8 +17,10 @@ from src.schemas.ai_task import AITaskSubmitResponse
 from src.schemas.image import (
     AIEditRequest,
     EditImageRequest,
+    ImageDetailResponse,
     ImageListResponse,
     ImageResponse,
+    ImageTagsRequest,
     ImageUploadResponse,
     UpdateImageNameRequest,
 )
@@ -62,14 +64,14 @@ async def list_images(
     """获取图片列表（支持搜索 + Redis 缓存）"""
     return await image_service.get_user_images(db, current_user, skip, limit, search)
 
-@router.get("/{image_id}", response_model=ImageResponse)
+@router.get("/{image_id}", response_model=ImageDetailResponse)
 def get_image(
     image_id : int,
     db : Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取图片详情"""
-    return image_service.get_image_detail(db, image_id, current_user)
+    """获取图片详情（含个人标签）"""
+    return image_service.get_image_detail_response(db, image_id, current_user)
 
 @router.get("/{image_id}/download")
 def download_original(
@@ -107,6 +109,30 @@ async def rename_image(
 ):
     """修改图片名称"""
     return image_service.update_image_name(db, image_id, req.custom_name, current_user)
+
+
+@router.post("/{image_id}/tags")
+async def add_image_tags(
+    image_id: int,
+    req: ImageTagsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """给个人图库图片添加标签（仅本人），返回该图片当前全部个人标签"""
+    tags = image_service.add_tags_to_image(db, image_id, req.tags, current_user)
+    return {"message": "标签已更新", "tags": tags}
+
+
+@router.delete("/{image_id}/tags/{tag_name}")
+async def remove_image_tag(
+    image_id: int,
+    tag_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """从个人图库图片移除标签（仅本人）"""
+    image_service.remove_tag_from_image(db, image_id, tag_name, current_user)
+    return {"message": "标签已删除"}
 
 
 @router.post("/{image_id}/edit", response_model=ImageUploadResponse)

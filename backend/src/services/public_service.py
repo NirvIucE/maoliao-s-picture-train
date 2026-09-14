@@ -17,37 +17,7 @@ from src.models.tag import Tag
 from src.models.user import User
 from src.services.agent_service import complete_llm
 from src.services.image_service import get_image_detail
-
-
-def _normalize_tags(raw_tags: list[str] | None) -> list[str]:
-    """标签规范化：去 # 前缀、去首尾空白、去空、去重（保序）"""
-    seen: set[str] = set()
-    result: list[str] = []
-    for raw in raw_tags or []:
-        name = raw.strip().lstrip("#").strip()
-        if not name or name in seen:
-            continue
-        seen.add(name)
-        result.append(name)
-    return result
-
-
-def _set_image_tags(db: Session, image: Image, raw_tags: list[str]) -> list[str]:
-    """给图片设置标签：Tag 存在则复用，否则新建；返回最终标签名列表"""
-    names = _normalize_tags(raw_tags)
-    if not names:
-        return []
-    existing = {
-        t.name: t for t in db.query(Tag).filter(Tag.name.in_(names)).all()
-    }
-    for name in names:
-        tag = existing.get(name)
-        if tag is None:
-            tag = Tag(name=name)
-            db.add(tag)
-        if tag not in image.tags:
-            image.tags.append(tag)
-    return names
+from src.services.tag_service import set_tags, tag_names
 
 
 def _can_manage(pi: PublicImage, user: User) -> bool:
@@ -71,12 +41,18 @@ def _build_item(pi: PublicImage, image: Image, submitter: User) -> dict:
         "thumbnail_url": image.thumbnail_url,
         "image_url": image.image_url,
         "is_visible": pi.is_visible,
-        "tags": [t.name for t in image.tags],
+        # 阶段 19：公共图库展示的是「公开标签」（public_image_tags），
+        # 与个人图库的 image_tags 分离，互不影响
+        "tags": tag_names(pi),
     }
 
 
 def submit_to_public(db: Session, image_id: int, user: User, tags: list[str] | None = None) -> dict:
-    """提交图片到公共图库（仅限自己图库已有图片），可选携带标签"""
+    """提交图片到公共图库（仅限自己图库已有图片），可选携带标签
+
+    阶段 19：传入的标签写入「公开标签」（public_image_tags），是**复制**而非共享——
+    之后用户在个人图库增删标签不会影响这条已提交记录。
+    """
     image = get_image_detail(db, image_id, user)
 
     # 防重复提交：同一图片已有 pending/approved 记录则拒绝
@@ -90,7 +66,7 @@ def submit_to_public(db: Session, image_id: int, user: User, tags: list[str] | N
     pi = PublicImage(image_id=image_id, user_id=user.id, status="pending")
     db.add(pi)
     if tags:
-        _set_image_tags(db, image, tags)
+        set_tags(db, pi, tags)
     db.commit()
     db.refresh(pi)
     return _build_item(pi, image, user)
@@ -119,9 +95,10 @@ def get_public_images(db: Session, user: User | None, skip: int = 0, limit: int 
     if search:
         if search.startswith("#"):
             # #标签 → 严格匹配标签名（非模糊）：搜 #猫 只命中标签恰好为"猫"的图片
+            # 阶段 19：搜的是「公开标签」，个人图库的私人标签不会出现在公共搜索里
             tag_name = search[1:].strip()
             if tag_name:
-                query = query.filter(Image.tags.any(Tag.name == tag_name))
+                query = query.filter(PublicImage.tags.any(Tag.name == tag_name))
         else:
             pattern = f"%{search}%"
             # 普通关键词：只匹配自定义名称（用户要求：不搜原始文件名）
@@ -167,7 +144,7 @@ def _parse_id_list(text: str) -> set[int]:
 async def _ai_search_semantic(rows, query: str, model_id: str) -> set[int]:
     """语义通道：候选元数据（id/标题/标签）分批送文本模型，返回匹配的 public_id 集合"""
     candidates = [
-        {"id": pi.id, "title": img.display_name, "tags": [t.name for t in img.tags]}
+        {"id": pi.id, "title": img.display_name, "tags": tag_names(pi)}
         for pi, img, _ in rows
     ]
     matched: set[int] = set()
@@ -349,28 +326,26 @@ def set_visibility(db: Session, public_id: int, visible: bool, user: User) -> No
 
 
 def add_tags_to_public(db: Session, public_id: int, raw_tags: list[str], user: User) -> list[str]:
-    """给公共图库图片添加标签（上传者本人或管理员），返回图片当前全部标签"""
+    """给公共图库图片添加标签（上传者本人或管理员），返回该记录当前全部公开标签
+
+    阶段 19：只写公开标签（public_image_tags），不回写 image_tags——
+    否则用户在公共图库删掉一个预填标签，个人图库的标签也会跟着消失。
+    """
     pi = _get_public_record(db, public_id)
     if not _can_manage(pi, user):
         raise HTTPException(status_code=403, detail="无权操作")
-    image = db.query(Image).filter(Image.id == pi.image_id).first()
-    if not image:
-        raise HTTPException(status_code=404, detail="图片不存在")
-    _set_image_tags(db, image, raw_tags)
+    set_tags(db, pi, raw_tags)
     db.commit()
-    return [t.name for t in image.tags]
+    return tag_names(pi)
 
 
 def remove_tag_from_public(db: Session, public_id: int, tag_name: str, user: User) -> None:
-    """从公共图库图片移除标签（上传者本人或管理员）"""
+    """从公共图库图片移除标签（上传者本人或管理员），只影响公开标签"""
     pi = _get_public_record(db, public_id)
     if not _can_manage(pi, user):
         raise HTTPException(status_code=403, detail="无权操作")
-    image = db.query(Image).filter(Image.id == pi.image_id).first()
-    if not image:
-        raise HTTPException(status_code=404, detail="图片不存在")
-    tag = next((t for t in image.tags if t.name == tag_name), None)
+    tag = next((t for t in pi.tags if t.name == tag_name), None)
     if tag is None:
         raise HTTPException(status_code=404, detail="标签不存在")
-    image.tags.remove(tag)
+    pi.tags.remove(tag)
     db.commit()
