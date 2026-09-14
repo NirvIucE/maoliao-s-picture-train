@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue"
 import { useRouter } from "vue-router"
-import { aiSearchPublic, getPublicImages, type PublicImageItem } from "@/api/public"
+import {
+  aiSearchPublic,
+  getPublicImages,
+  getPublicTags,
+  type ImageTagStat,
+  type PublicImageItem,
+} from "@/api/public"
 
 const router = useRouter()
 const items = ref<PublicImageItem[]>([])
@@ -12,6 +18,9 @@ const hasMore = ref(false)
 const searchInput = ref("")
 const aiEnabled = ref(false)
 const aiNote = ref("")
+// 阶段 22：单选标签筛选，与搜索框同时生效时后端取 AND
+const activeTag = ref("")
+const tagStats = ref<ImageTagStat[]>([])
 
 function onSearch() {
   if (aiEnabled.value) {
@@ -25,7 +34,7 @@ function onSearch() {
       aiLoad()
     }
   } else {
-    load(searchInput.value || undefined)
+    load()
   }
 }
 
@@ -34,12 +43,21 @@ function onAiToggle() {
   aiNote.value = aiEnabled.value && !searchInput.value.trim() ? "输入搜索词后即可使用 AI 搜索" : ""
 }
 
-async function load(search?: string) {
+// 当前筛选条件（search + tag），列表请求统一从这里取，避免各处拼参数漏掉 tag
+function currentSearch(): string | undefined {
+  return searchInput.value || undefined
+}
+
+function currentTag(): string | undefined {
+  return activeTag.value || undefined
+}
+
+async function load() {
   loading.value = true
   errorMsg.value = ""
   aiNote.value = ""
   try {
-    const res = await getPublicImages(0, 50, search)
+    const res = await getPublicImages(0, 50, currentSearch(), currentTag())
     items.value = res.items
     total.value = res.total
     hasMore.value = items.value.length < total.value
@@ -47,6 +65,29 @@ async function load(search?: string) {
     errorMsg.value = error.response?.data?.detail || "加载失败"
   } finally {
     loading.value = false
+  }
+}
+
+// 阶段 22：点标签 chip 筛选；已选中再点一次取消
+function toggleTag(tag: string) {
+  if (aiEnabled.value) return
+  activeTag.value = activeTag.value === tag ? "" : tag
+  load()
+}
+
+function clearFilters() {
+  searchInput.value = ""
+  activeTag.value = ""
+  load()
+}
+
+async function loadTagStats() {
+  try {
+    const res = await getPublicTags()
+    tagStats.value = res.items
+  } catch {
+    // 筛选条是可选项：拉取失败不影响公共图库浏览
+    tagStats.value = []
   }
 }
 
@@ -87,7 +128,7 @@ async function loadMore() {
   errorMsg.value = ""
   aiNote.value = ""
   try {
-    const res = await getPublicImages(items.value.length, 50, searchInput.value || undefined)
+    const res = await getPublicImages(items.value.length, 50, currentSearch(), currentTag())
     items.value.push(...res.items)
     hasMore.value = items.value.length < total.value
   } catch (error: any) {
@@ -101,7 +142,10 @@ function goDetail(id: number) {
   router.push(`/public/${id}`)
 }
 
-onMounted(() => load())
+onMounted(() => {
+  load()
+  loadTagStats()
+})
 </script>
 
 <template>
@@ -121,9 +165,30 @@ onMounted(() => load())
       </label>
     </div>
 
+    <!-- 阶段 22：标签筛选条。AI 搜索模式隐藏（AI 走另一套召回口径，混入标签筛选无法解释结果） -->
+    <div v-if="!aiEnabled && tagStats.length" class="tag-filter-bar">
+      <span class="filter-label">按标签筛选：</span>
+      <button
+        v-for="tag in tagStats"
+        :key="tag.name"
+        class="filter-chip"
+        :class="{ active: activeTag === tag.name }"
+        @click="toggleTag(tag.name)"
+      >
+        #{{ tag.name }}<span class="chip-count">{{ tag.count }}</span>
+      </button>
+      <button v-if="activeTag || searchInput" class="filter-clear" @click="clearFilters">
+        清除筛选
+      </button>
+    </div>
+
     <p v-if="loading">{{ aiEnabled ? "AI 搜索中..." : "加载中..." }}</p>
     <p v-else-if="errorMsg" class="error">{{ errorMsg }}</p>
     <p v-else-if="aiNote" class="note">{{ aiNote }}</p>
+    <p v-else-if="items.length === 0 && !aiEnabled && (activeTag || searchInput)">
+      没有符合条件的图片，
+      <button class="link-btn" @click="clearFilters">清除筛选</button>
+    </p>
     <p v-else-if="items.length === 0">{{ aiEnabled ? "没有找到匹配的图片" : "公共图库暂无图片" }}</p>
     <div v-else class="grid">
       <div v-for="item in items" :key="item.id" class="card" @dblclick="goDetail(item.id)">
@@ -135,8 +200,15 @@ onMounted(() => load())
         <div class="info">
           <p class="name" :title="item.display_name">{{ item.display_name }}</p>
           <p class="author">by {{ item.username || "未知" }}</p>
-          <div v-if="item.tags?.length" class="tags">
-            <span v-for="tag in item.tags.slice(0, 3)" :key="tag" class="tag-chip">#{{ tag }}</span>
+          <div v-if="item.tags?.length" class="tags" @dblclick.stop>
+            <button
+              v-for="tag in item.tags.slice(0, 3)"
+              :key="tag"
+              class="tag-chip"
+              :class="{ active: activeTag === tag }"
+              :title="`筛选标签 #${tag}`"
+              @click.stop="toggleTag(tag)"
+            >#{{ tag }}</button>
             <span v-if="item.tags.length > 3" class="tag-more">+{{ item.tags.length - 3 }}</span>
           </div>
         </div>
@@ -188,6 +260,54 @@ onMounted(() => load())
   color: #606266;
   user-select: none;
 }
+/* 阶段 22：标签筛选条（与个人图库保持一致的视觉） */
+.tag-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.filter-label { color: #909399; font-size: 13px; }
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border: 1px solid #d9ecff;
+  background: #ecf5ff;
+  color: #409eff;
+  border-radius: 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.filter-chip.active {
+  background: #409eff;
+  border-color: #409eff;
+  color: #fff;
+}
+.chip-count {
+  font-size: 11px;
+  opacity: 0.75;
+}
+.filter-clear {
+  padding: 3px 10px;
+  border: 1px solid #dcdfe6;
+  background: #fff;
+  color: #606266;
+  border-radius: 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.link-btn {
+  border: none;
+  background: none;
+  color: #409eff;
+  cursor: pointer;
+  font-size: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -217,6 +337,7 @@ onMounted(() => load())
 }
 .author { margin: 0; color: #909399; font-size: 13px; }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+/* 阶段 22：卡片标签由 span 改为 button（可点击筛选） */
 .tag-chip {
   background: #ecf5ff;
   color: #409eff;
@@ -224,6 +345,14 @@ onMounted(() => load())
   border-radius: 4px;
   padding: 1px 6px;
   font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.tag-chip:hover { background: #d9ecff; }
+.tag-chip.active {
+  background: #409eff;
+  border-color: #409eff;
+  color: #fff;
 }
 .tag-more { color: #909399; font-size: 12px; line-height: 20px; }
 .count { color: #909399; margin-top: 20px; }

@@ -1,4 +1,5 @@
 import api from "./client"
+import type { ImageTagStat } from "./images"
 
 export interface PublicImageItem {
     id: number
@@ -27,9 +28,23 @@ export function submitToPublic(imageId: number, tags: string[] = []): Promise<Pu
     return api.post("/public/images", { image_id: imageId, tags })
 }
 
-// 浏览公共图库（仅审核通过的图片，支持按名称搜索）
-export function getPublicImages(skip = 0, limit = 20, search?: string): Promise<PublicImageListResponse> {
-    return api.get("/public/images", { params: { skip, limit, search } })
+// 浏览公共图库（仅审核通过的图片，支持按名称搜索 + 标签筛选）
+export function getPublicImages(skip = 0, limit = 20, search?: string, tag?: string): Promise<PublicImageListResponse> {
+    const params: Record<string, any> = { skip, limit }
+    if(search) params.search = search
+    if(tag) params.tag = tag
+    return api.get("/public/images", { params: params })
+}
+
+// 阶段 22：公共图库标签统计（筛选条数据源）
+// 口径随当前请求者角色变化，匿名只统计可见图片 —— 由后端负责，前端不再自行聚合
+export interface PublicTagListResponse {
+    total: number
+    items: ImageTagStat[]
+}
+
+export function getPublicTags(): Promise<PublicTagListResponse> {
+    return api.get("/public/images/tags")
 }
 
 // AI 搜索公共图库（语义：标题+标签 / 识图：视觉模型），note 为后端附加提示
