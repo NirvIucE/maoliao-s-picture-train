@@ -1,4 +1,5 @@
-"""public_images 模块接口测试：提交 / 列表 / 我的 / 待审 / 审核 / 下架 / 详情 / 可见性 / 删除（见计划 3.1 节）
+"""public_images 模块接口测试：提交 / 列表 / 我的 / 待审 / 审核 / 下架 / 详情 / 可见性 /
+删除 / 标签筛选（见计划 3.1 节）
 
 状态码依据实际路由 + public_service：
 - submit 成功 200，重复 400，非本人图 404，无 token 401
@@ -11,9 +12,12 @@
 - delete：owner 或 admin 可删 200，他人 403
 """
 
+from io import BytesIO
+
 import httpx
 import pytest
 import respx
+from PIL import Image as PILImage
 
 
 # ── 辅助 fixtures ──
@@ -63,7 +67,9 @@ class TestSubmit:
 
     def test_submit_not_owner(self, client, other_user_headers, test_image):
         """bob 提交 alice 的图 → 404（所有权隔离）"""
-        r = client.post("/api/public/images", headers=other_user_headers, json={"image_id": test_image})
+        r = client.post(
+            "/api/public/images", headers=other_user_headers, json={"image_id": test_image}
+        )
         assert r.status_code == 404
 
     def test_submit_unauthorized(self, client, test_image):
@@ -284,7 +290,7 @@ class TestAnonymous:
         assert len(r.content) > 0  # 有文件内容
 
     def test_anonymous_cannot_see_hidden(self, client, auth_headers, admin_headers, pending_public_id):
-        """匿名用户看不到 is_visible=False 的图（先 approve 再隐藏）"""
+        """匿名用户看不到 is_visible=False 的图（先审核通过再隐藏）"""
         # admin 审核通过
         client.post(
             f"/api/public/images/{pending_public_id}/review",
@@ -648,3 +654,199 @@ class TestAISearch:
         )
         assert r.status_code == 200
         assert r.json()["total"] >= 1
+
+
+class TestPublicTagFiltering:
+    """阶段 22：公共图库标签筛选（GET /api/public/images?tag=）与标签统计（.../tags）
+
+    重点在**可见性口径**：标签聚合必须与列表用同一套规则（`_apply_visibility`），
+    否则会向匿名访客泄露不可见 / 未审核记录的标签名。
+    """
+
+    def _upload(self, client, headers, name):
+        """上传一张新图并返回 image_id"""
+        buf = BytesIO()
+        PILImage.new("RGB", (10, 10), (0, 128, 255)).save(buf, format="PNG")
+        buf.seek(0)
+        r = client.post(
+            "/api/images/upload",
+            headers=headers,
+            files={"file": ("t.png", buf, "image/png")},
+            data={"custom_name": name},
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["id"]
+
+    def _publish(self, client, headers, admin_headers, tags=None, name="公共图"):
+        """上传 → 提交公共库（可带标签）→ admin 审核通过，返回 (image_id, public_id)"""
+        image_id = self._upload(client, headers, name)
+        r = client.post(
+            "/api/public/images",
+            headers=headers,
+            json={"image_id": image_id, "tags": tags or []},
+        )
+        assert r.status_code == 200, r.text
+        public_id = r.json()["id"]
+        r = client.post(
+            f"/api/public/images/{public_id}/review",
+            headers=admin_headers,
+            json={"action": "approve"},
+        )
+        assert r.status_code == 200, r.text
+        return image_id, public_id
+
+    def _hide(self, client, headers, public_id):
+        """owner 把已审核记录改成不可见"""
+        r = client.post(
+            f"/api/public/images/{public_id}/visibility",
+            headers=headers,
+            json={"visible": False},
+        )
+        assert r.status_code == 200, r.text
+
+    def _stats(self, client, headers=None):
+        """取公共标签统计（headers=None → 匿名）"""
+        r = client.get("/api/public/images/tags", headers=headers)
+        assert r.status_code == 200, r.text
+        return r.json()["items"]
+
+    def _total(self, client, headers=None, **params):
+        """按条件查公共列表并返回 total"""
+        r = client.get("/api/public/images", headers=headers, params=params)
+        assert r.status_code == 200, r.text
+        return r.json()["total"]
+
+    def test_filter_by_tag(self, client, auth_headers, admin_headers):
+        """tag= 只返回命中该公开标签的图（且响应带 tags）"""
+        _, hit = self._publish(
+            client, auth_headers, admin_headers, tags=["阶段22猫"], name="命中的图"
+        )
+        self._publish(client, auth_headers, admin_headers, name="没标签的图")
+
+        r = client.get(
+            "/api/public/images", headers=auth_headers, params={"tag": "阶段22猫"}
+        )
+        assert r.status_code == 200
+        assert r.json()["total"] == 1
+        assert r.json()["items"][0]["id"] == hit
+        assert r.json()["items"][0]["tags"] == ["阶段22猫"]
+
+    def test_filter_tag_is_exact_not_fuzzy(self, client, auth_headers, admin_headers):
+        """标签是精确匹配：标签「狸花猫」不会被 tag=猫 命中（与 #标签 语义一致）"""
+        self._publish(client, auth_headers, admin_headers, tags=["狸花猫"], name="狸花猫图")
+
+        assert self._total(client, auth_headers, tag="猫") == 0
+        assert self._total(client, auth_headers, tag="狸花猫") == 1
+
+    def test_filter_and_search_take_and(self, client, auth_headers, admin_headers):
+        """tag 与 search 同时给出取 AND：名称命中但标签不命中 → 空"""
+        _, hit = self._publish(
+            client, auth_headers, admin_headers, tags=["阶段22猫"], name="公共猫猫写真"
+        )
+        # 名称同样命中「公共猫猫」，但没有该标签
+        self._publish(client, auth_headers, admin_headers, name="公共猫猫风景")
+
+        both = client.get(
+            "/api/public/images",
+            headers=auth_headers,
+            params={"search": "公共猫猫", "tag": "阶段22猫"},
+        )
+        assert both.json()["total"] == 1
+        assert both.json()["items"][0]["id"] == hit
+
+        mismatch = client.get(
+            "/api/public/images",
+            headers=auth_headers,
+            params={"search": "公共猫猫", "tag": "不存在的标签"},
+        )
+        assert mismatch.json()["total"] == 0
+
+    def test_personal_tags_do_not_affect_public_filter(
+        self, client, auth_headers, admin_headers
+    ):
+        """两层隔离不破：个人图库标签不参与公共筛选（公开标签是另一份）"""
+        image_id, _ = self._publish(client, auth_headers, admin_headers, name="两层隔离图")
+        client.post(
+            f"/api/images/{image_id}/tags", headers=auth_headers, json={"tags": ["私人标签22"]}
+        )
+
+        assert self._total(client, auth_headers, tag="私人标签22") == 0
+        assert "私人标签22" not in [t["name"] for t in self._stats(client, auth_headers)]
+
+    def test_tag_stats_counts_and_order(self, client, auth_headers, admin_headers):
+        """标签统计：计数正确、按 count 降序、同 count 按 name 升序"""
+        self._publish(client, auth_headers, admin_headers, tags=["甲", "乙"], name="图一")
+        self._publish(client, auth_headers, admin_headers, tags=["甲"], name="图二")
+
+        assert self._stats(client, auth_headers) == [
+            {"name": "甲", "count": 2},
+            {"name": "乙", "count": 1},
+        ]
+
+    def test_anonymous_stats_exclude_hidden(self, client, auth_headers, admin_headers):
+        """匿名视角：不可见图的标签不出现在聚合里（否则等于泄露）"""
+        _, hidden = self._publish(
+            client, auth_headers, admin_headers, tags=["隐藏标签22"], name="隐藏图"
+        )
+        self._hide(client, auth_headers, hidden)
+
+        assert self._total(client, None, tag="隐藏标签22") == 0
+        assert self._stats(client, None) == []
+
+    def test_owner_sees_own_hidden_in_stats(self, client, auth_headers, admin_headers):
+        """owner 例外：自己上传的不可见图，其标签出现在**自己的**聚合里
+
+        同一条数据、两种视角：匿名看到空，owner 看到 1 —— 这正是可见性口径生效的证据。
+        """
+        _, hidden = self._publish(
+            client, auth_headers, admin_headers, tags=["隐藏标签22"], name="隐藏图"
+        )
+        self._hide(client, auth_headers, hidden)
+
+        assert self._stats(client, None) == []
+        assert self._stats(client, auth_headers) == [{"name": "隐藏标签22", "count": 1}]
+        assert self._total(client, auth_headers, tag="隐藏标签22") == 1
+
+    def test_pending_tags_not_counted(self, client, auth_headers, admin_headers):
+        """未审核（pending）记录的标签在匿名/owner/admin 三种视角下都不计入"""
+        image_id = self._upload(client, auth_headers, "待审图")
+        r = client.post(
+            "/api/public/images",
+            headers=auth_headers,
+            json={"image_id": image_id, "tags": ["待审标签22"]},
+        )
+        assert r.status_code == 200, r.text
+
+        assert self._stats(client, None) == []
+        assert self._stats(client, auth_headers) == []
+        assert self._stats(client, admin_headers) == []
+
+    def test_admin_sees_all_approved_including_hidden(
+        self, client, auth_headers, admin_headers
+    ):
+        """admin 视角能看到全部 approved（含不可见），匿名看不到 —— 同一份数据两种视角"""
+        _, hidden = self._publish(
+            client, auth_headers, admin_headers, tags=["管理员可见22"], name="隐藏图"
+        )
+        self._hide(client, auth_headers, hidden)
+
+        assert self._stats(client, None) == []
+        assert self._stats(client, admin_headers) == [{"name": "管理员可见22", "count": 1}]
+
+    def test_tags_endpoint_anonymous_and_route_order(self, client):
+        """匿名可访问 + 路由不被 /{public_id} 截胡（200 而非 422）"""
+        r = client.get("/api/public/images/tags")
+        assert r.status_code == 200
+        assert r.json() == {"total": 0, "items": []}
+
+    def test_hash_tag_search_still_works(self, client, auth_headers, admin_headers):
+        """回归：#标签 搜索语义不变（阶段 12 / E2E flow2 依赖它）"""
+        _, hit = self._publish(
+            client, auth_headers, admin_headers, tags=["阶段22猫"], name="井号搜索图"
+        )
+
+        r = client.get(
+            "/api/public/images", headers=auth_headers, params={"search": "#阶段22猫"}
+        )
+        assert r.json()["total"] == 1
+        assert r.json()["items"][0]["id"] == hit
