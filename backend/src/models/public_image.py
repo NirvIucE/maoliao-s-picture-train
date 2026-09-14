@@ -4,8 +4,10 @@
 from datetime import datetime
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy.orm import relationship
 
 from src.database import Base
+from src.models.tag import public_image_tags
 
 
 class PublicImage(Base):
@@ -20,3 +22,6 @@ class PublicImage(Base):
     reviewed_at    = Column(DateTime, nullable=True)
     created_at     = Column(DateTime, default=datetime.now)
     is_visible     = Column(Boolean, nullable=False, default=True, server_default="1", comment="普通用户是否可见")
+
+    # ORM 关系：公开标签（阶段 19 起与 Image.tags 个人标签分离）
+    tags = relationship("Tag", secondary=public_image_tags, back_populates="public_images")
