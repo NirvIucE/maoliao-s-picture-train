@@ -34,10 +34,13 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 
+# 说明：PublicImage 本身未被直接使用，但必须导入——Tag 的 public_images 关系
+# 指向它，缺了会在 configure_mappers() 阶段报 InvalidRequestError。
 from src.config import UPLOAD_ROOT  # noqa: E402
 from src.database import SessionLocal  # noqa: E402
 from src.models.ai_task import AITask  # noqa: E402
 from src.models.image import Image  # noqa: E402
+from src.models.public_image import PublicImage  # noqa: E402, F401
 from src.models.user import User  # noqa: E402
 
 # users.avatar_url 存的是 URL（/static/uploads/avatars/xxx.png），需还原成磁盘路径

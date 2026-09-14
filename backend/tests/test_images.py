@@ -1,4 +1,5 @@
-"""images 模块接口测试：上传 / 列表 / 详情 / 下载 / 删除 / 改名 / 编辑 / 替换 / AI编辑（见计划 3.1 节）
+"""images 模块接口测试：上传 / 列表 / 详情 / 下载 / 删除 / 改名 / 编辑 / 替换 / AI编辑
+（见计划 3.1 节）
 
 状态码依据实际路由 + image_service：
 - upload 成功 200，无 token 401，非法格式 400
@@ -13,6 +14,7 @@
 - ai-edit 提交 200（返回 task_id），不存在/非本人 404（任务执行见 test_tasks.py）
 """
 
+import asyncio
 from io import BytesIO
 
 import httpx
@@ -21,6 +23,8 @@ import respx
 from fastapi import HTTPException
 from PIL import Image as PILImage
 
+from src.cache import cache_get, cache_set
+from src.models.user import User
 from src.services import image_service
 
 
@@ -162,6 +166,171 @@ class TestListImages:
         assert r.json()["items"][0]["custom_name"] == "fixture 图"
 
 
+class TestImageTagFiltering:
+    """阶段 21：个人图库标签筛选（GET /api/images?tag=）与标签统计（GET /api/images/tags）"""
+
+    def _upload(self, client, headers, name=None):
+        """上传一张新图并返回 image_id"""
+        data = {"custom_name": name} if name else None
+        r = client.post(
+            "/api/images/upload",
+            headers=headers,
+            files={"file": ("t.png", _make_png(), "image/png")},
+            data=data,
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["id"]
+
+    def _tag(self, client, headers, image_id, tags):
+        """给图片打标签"""
+        return client.post(
+            f"/api/images/{image_id}/tags", headers=headers, json={"tags": tags}
+        )
+
+    def _total(self, client, headers, **params):
+        """请求图片列表并返回 total"""
+        r = client.get("/api/images", headers=headers, params=params)
+        assert r.status_code == 200, r.text
+        return r.json()["total"]
+
+    def test_filter_by_tag(self, client, auth_headers):
+        """按标签筛选 → 只返回打了该标签的图（且响应带 tags）"""
+        tagged = self._upload(client, auth_headers, "带标签的图")
+        self._upload(client, auth_headers, "没标签的图")
+        self._tag(client, auth_headers, tagged, ["猫"])
+
+        r = client.get("/api/images", headers=auth_headers, params={"tag": "猫"})
+        assert r.status_code == 200
+        assert r.json()["total"] == 1
+        assert r.json()["items"][0]["id"] == tagged
+        assert r.json()["items"][0]["tags"] == ["猫"]
+
+    def test_filter_no_match(self, client, auth_headers, test_image):
+        """用不存在的标签筛选 → 空结果（而不是退化成返回全量）"""
+        r = client.get("/api/images", headers=auth_headers, params={"tag": "不存在的标签"})
+        assert r.status_code == 200
+        assert r.json() == {"total": 0, "items": []}
+
+    def test_filter_tag_is_exact_not_fuzzy(self, client, auth_headers):
+        """标签是精确匹配：标签"狸花猫"不会被 tag=猫 命中（与标签搜索语义一致）"""
+        image = self._upload(client, auth_headers, "狸花猫图")
+        self._tag(client, auth_headers, image, ["狸花猫"])
+
+        assert self._total(client, auth_headers, tag="猫") == 0
+        assert self._total(client, auth_headers, tag="狸花猫") == 1
+
+    def test_filter_and_search_take_and(self, client, auth_headers):
+        """tag 与 search 同时给出取 AND：名称命中但标签不命中 → 空"""
+        target = self._upload(client, auth_headers, "猫猫写真")
+        self._upload(client, auth_headers, "风景照")
+        self._tag(client, auth_headers, target, ["猫"])
+
+        both = client.get(
+            "/api/images", headers=auth_headers, params={"search": "猫猫", "tag": "猫"}
+        )
+        assert both.json()["total"] == 1
+        assert both.json()["items"][0]["id"] == target
+
+        mismatch = client.get(
+            "/api/images", headers=auth_headers, params={"search": "猫猫", "tag": "狗"}
+        )
+        assert mismatch.json()["total"] == 0
+
+    def test_filter_only_returns_own_images(
+        self, client, auth_headers, other_user_headers
+    ):
+        """越权保护：他人图片打同名标签也不出现在结果里；他人独有标签筛出空"""
+        mine = self._upload(client, auth_headers, "我的猫")
+        theirs = self._upload(client, other_user_headers, "bob 的猫")
+        self._tag(client, auth_headers, mine, ["猫"])
+        self._tag(client, other_user_headers, theirs, ["猫", "狗"])
+
+        r = client.get("/api/images", headers=auth_headers, params={"tag": "猫"})
+        assert r.json()["total"] == 1
+        assert r.json()["items"][0]["id"] == mine
+
+        # "狗" 只挂在 bob 的图上 → alice 筛出空
+        assert self._total(client, auth_headers, tag="狗") == 0
+
+    def test_filter_does_not_read_full_cache(self, client, auth_headers):
+        """缓存隔离①：先无筛选请求写入 page0，再带 tag 请求 → 必须返回筛选结果
+
+        漏改缓存判定的话，这里会命中 page0 全量缓存返回 2 条。
+        """
+        mine = self._upload(client, auth_headers, "带标签")
+        self._upload(client, auth_headers, "无标签")
+        self._tag(client, auth_headers, mine, ["猫"])
+
+        assert self._total(client, auth_headers) == 2  # 写入 page0
+
+        r = client.get("/api/images", headers=auth_headers, params={"tag": "猫"})
+        assert r.json()["total"] == 1
+        assert r.json()["items"][0]["id"] == mine
+
+    def test_filter_result_is_not_written_into_cache(self, client, auth_headers):
+        """缓存隔离②：先带 tag 请求（此时缓存为空），再无筛选请求 → 必须返回全量
+
+        漏改缓存判定的话，筛选结果会被写进 page0，这里只会拿到 1 条。
+        """
+        mine = self._upload(client, auth_headers, "带标签")
+        self._upload(client, auth_headers, "无标签")
+        self._tag(client, auth_headers, mine, ["猫"])
+
+        assert self._total(client, auth_headers, tag="猫") == 1
+
+        full = client.get("/api/images", headers=auth_headers)
+        assert full.json()["total"] == 2
+        assert all("tags" in item for item in full.json()["items"])
+
+    def test_tag_stats_counts_and_order(self, client, auth_headers, other_user_headers):
+        """标签统计：计数正确、按使用次数降序、只含本人标签"""
+        first = self._upload(client, auth_headers, "图一")
+        second = self._upload(client, auth_headers, "图二")
+        self._tag(client, auth_headers, first, ["猫", "风景"])
+        self._tag(client, auth_headers, second, ["猫"])
+
+        theirs = self._upload(client, other_user_headers, "bob 的图")
+        self._tag(client, other_user_headers, theirs, ["狗"])
+
+        r = client.get("/api/images/tags", headers=auth_headers)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["total"] == 2
+        assert body["items"] == [{"name": "猫", "count": 2}, {"name": "风景", "count": 1}]
+
+    def test_tags_endpoint_not_shadowed_by_image_id_route(self, client, auth_headers):
+        """路由顺序：/api/images/tags 必须命中原端点，而不是被 /{image_id} 截胡报 422"""
+        r = client.get("/api/images/tags", headers=auth_headers)
+        assert r.status_code == 200
+        assert r.json() == {"total": 0, "items": []}
+
+    async def test_tag_change_invalidates_list_cache(
+        self, client, auth_headers, registered_user, db_session, fake_redis
+    ):
+        """缓存隔离③：标签增删后 page0 必须被清，否则图库显示旧标签直到 TTL 到期
+
+        清缓存走 `asyncio.create_task`，在 TestClient 的请求循环里跑不完，
+        因此这里直接调 service，并在测试协程里给它一次执行机会。
+        """
+        user = db_session.query(User).filter_by(username=registered_user["username"]).first()
+        assert user is not None
+        image_id = self._upload(client, auth_headers, "待打标签")
+
+        key = f"images:user:{user.id}:page0"
+        await cache_set(key, {"total": 1, "items": []}, 60)
+        assert await cache_get(key) is not None
+
+        image_service.add_tags_to_image(db_session, image_id, ["猫"], user)
+        await asyncio.sleep(0.1)  # 让 create_task 的清理任务执行
+        assert await cache_get(key) is None
+
+        # 删标签同样要清
+        await cache_set(key, {"total": 1, "items": []}, 60)
+        image_service.remove_tag_from_image(db_session, image_id, "猫", user)
+        await asyncio.sleep(0.1)
+        assert await cache_get(key) is None
+
+
 class TestGetImageDetail:
     def test_get_detail_success(self, client, auth_headers, test_image):
         """获取详情 → 200 + 正确 id"""
@@ -224,12 +393,15 @@ class TestImageTags:
         r = client.get(f"/api/images/{test_image}", headers=auth_headers)
         assert r.json()["tags"] == []
 
-    def test_list_does_not_include_tags(self, client, auth_headers, test_image):
-        """列表接口保持 ImageResponse（无 tags）：列表走 Redis 缓存，不加字段"""
+    def test_list_includes_tags(self, client, auth_headers, test_image):
+        """列表接口带 tags（阶段 21 反转阶段 19 的决定：图库网格要展示标签并可点击筛选）
+
+        随之而来两处代价已处理：标签增删清列表缓存 + selectinload 防 N+1。
+        """
         client.post(f"/api/images/{test_image}/tags", headers=auth_headers, json={"tags": ["猫"]})
         r = client.get("/api/images", headers=auth_headers)
         assert r.status_code == 200
-        assert "tags" not in r.json()["items"][0]
+        assert r.json()["items"][0]["tags"] == ["猫"]
 
     def test_remove_tag_owner(self, client, auth_headers, test_image):
         """owner 删标签 → 200；重复删 → 404"""
