@@ -1,0 +1,150 @@
+# 持续集成（阶段 23）
+#
+# 三个 job：
+#   backend  — ruff / mypy / pytest（MySQL service + fakeredis，不连真实 Redis）
+#   frontend — tsc 类型检查 + 生产构建
+#   e2e      — Playwright 真实前后端联调（webServer 自动起后端与前端）
+#
+# 零密钥设计：E2E 用例（flow4/flow5）在浏览器层用 page.route mock 了 /api/agent/chat，
+# pytest 用 respx + fakeredis，因此 CI 不需要任何 AI Key，
+# 下面这些变量都是 CI 专用的一次性值。
+
+name: CI
+
+on:
+  push:
+    branches: [dev, master, main]
+  pull_request:
+    branches: [dev, master, main]
+  workflow_dispatch:
+
+env:
+  DB_HOST: 127.0.0.1
+  DB_PORT: "3306"
+  DB_USER: root
+  DB_PASSWORD: ci-root-pwd
+  JWT_SECRET_KEY: ci-only-secret-not-for-production
+  LOG_LEVEL_CONSOLE: WARNING
+
+jobs:
+  backend:
+    name: 后端（ruff + mypy + pytest）
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-pwd
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-root-pwd"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: 安装依赖（含 dev 组：pytest / ruff / mypy）
+        working-directory: backend
+        run: uv sync --frozen
+
+      # 说明：ruff / mypy 目前仍有历史遗留告警（基线：ruff 18 条、mypy 52 条），
+      # 本阶段的策略是「不新增」而非清零，因此不阻断流水线，但结果照常打印。
+      # pytest 是硬门禁：必须全绿。
+      - name: ruff 静态检查（基线管理，不阻断）
+        working-directory: backend
+        continue-on-error: true
+        run: uv run ruff check src/ tests/
+
+      - name: mypy 类型检查（基线管理，不阻断）
+        working-directory: backend
+        continue-on-error: true
+        run: uv run mypy src
+
+      - name: pytest（硬门禁）
+        working-directory: backend
+        run: uv run pytest -q --cov=src --cov-report=term-missing
+
+  frontend:
+    name: 前端（tsc + 构建）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: TypeScript 类型检查
+        run: npx tsc --noEmit
+
+      - name: 生产构建（校验 SPA 产物可生成）
+        run: npm run build
+
+  e2e:
+    name: E2E（Playwright 真实前后端）
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-pwd
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-root-pwd"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Playwright 的 webServer 会用 `uv run` 启动后端，
+      # 这里先同步一次依赖，避免首次运行把安装时间混进启动超时里
+      - name: 安装后端依赖
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: 安装前端依赖
+        working-directory: frontend
+        run: npm ci
+
+      - name: 安装 Playwright 浏览器（仅 chromium）
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: 运行 E2E（会自动建 cat_pic_e2e 库 + 迁移 + 种子 admin）
+        working-directory: frontend
+        run: npx playwright test
+
+      - name: 上传失败产物（trace / 截图）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/test-results
+          retention-days: 7

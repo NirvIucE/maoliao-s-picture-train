@@ -6,9 +6,12 @@
 
 - **用户系统**：注册、登录、JWT 鉴权、角色（普通用户/管理员）、专属 UID（UUID）、头像、个人资料编辑（改名/改密/头像）
 - **图片上传与管理**：本地文件上传、URL 上传、自动 WebP 压缩与缩略图、图片列表/详情/删除/改名
-- **AI 能力**：图片视觉分析、AI 对话助手、AI 图片编辑（涂鸦、抠图、旋转/翻转/裁剪、区域编辑）
-- **公共图库**：提交/审核/下架/撤回、可见性控制、删除原图级联删除公共记录
-- **缓存优化**：Redis 缓存用户信息与热点数据
+- **标签体系**：个人图库标签与公共图库标签**两层分离**；支持按标签精确筛选（个人库与公共库均可）、标签使用次数统计、点击标签快速筛选
+- **AI 能力**：图片视觉分析、AI 对话助手（SSE 流式）、AI 图片编辑（涂鸦、抠图、旋转/翻转/裁剪、区域编辑）
+- **AI 助手工具调用**：模型可自主调用图库工具（检索图片 / 查询图片信息 / 提交公共库），提交类写操作走**人工确认**（human-in-the-loop），工具层只校验不落库
+- **AI 异步任务**：AI 区域编辑改为任务化（提交即返回、后台生成、轮询进度、可取消、服务重启自动回收僵尸任务），并用信号量限流保护上游
+- **公共图库**：提交/审核/下架/撤回、三层可见性控制（匿名 / 普通用户 / 管理员）、AI 语义搜索、删除原图级联删除公共记录
+- **缓存优化**：Redis 缓存用户信息与图片列表首页，缓存边界与失效策略明确（带筛选条件时不读写缓存）
 
 ## 技术栈
 
@@ -43,16 +46,35 @@
 
 ## 快速开始
 
-### 环境要求
+### 方式一：Docker 一键启动（推荐）
+
+无需安装 Python / Node / MySQL / Redis，只要有 Docker 即可：
+
+```powershell
+docker compose up -d --build
+```
+
+启动后访问 `http://localhost:8000`（前端构建产物由后端同源托管，接口文档在 `/docs`）。
+
+- 数据库表结构由容器启动脚本自动执行 `alembic upgrade head` 创建，无需手动迁移
+- 图片与数据库分别持久化在命名卷 `uploads_data` / `mysql_data`：`docker compose down` 后重新 `up`，数据仍在（加了 `-v` 才会删除）
+- 端口：应用 `8000`；MySQL `3307`、Redis `6380`（刻意错开本机常用的 3306/6379，仅供调试，服务间通信走容器内部网络）
+- 可选覆盖默认值：`cp .env.example .env`（数据库密码 / JWT 密钥 / AI Key / 端口）
+- 设置管理员：`docker compose exec app python scripts/promote_admin.py <用户名>`
+- 首次构建需拉取基础镜像并编译前端，耗时较长；若国内网络拉取镜像失败，请为 Docker Desktop 配置镜像加速器
+
+### 方式二：本地开发
+
+#### 环境要求
 
 - Python 3.x + [uv](https://docs.astral.sh/uv/)
 - Node.js 22+
 - MySQL 8.0
 - Redis 7.0+
 
-### 1. 配置环境变量
+#### 1. 配置环境变量
 
-在 `backend/` 目录下创建 `.env` 文件，参考以下内容：
+在 `backend/` 目录下创建 `.env` 文件（可直接复制模板 `backend/.env.example`）：
 
 ```env
 # 数据库
@@ -83,7 +105,7 @@ AI_MODELS=
 
 > `AI_MODELS` 格式：`id|名称|类型|provider`，多个模型用英文逗号分隔。
 
-### 2. 启动 Redis
+#### 2. 启动 Redis
 
 使用 Docker 启动 Redis 容器（容器名为 `redis`）：
 
@@ -91,7 +113,7 @@ AI_MODELS=
 docker run -d --name redis -p 6379:6379 redis:7
 ```
 
-### 3. 安装后端依赖并执行数据库迁移
+#### 3. 安装后端依赖并执行数据库迁移
 
 ```powershell
 cd backend
@@ -101,7 +123,7 @@ uv run alembic upgrade head
 
 > 数据库迁移用于增量更新表结构，不会丢失已有数据。
 
-### 4. 启动后端
+#### 4. 启动后端
 
 ```powershell
 cd backend
@@ -110,7 +132,7 @@ uv run uvicorn src.main:app --host 0.0.0.0 --port 8000
 
 后端运行在 `http://localhost:8000`，接口文档见 `http://localhost:8000/docs`。
 
-### 5. 启动前端（开发模式）
+#### 5. 启动前端（开发模式）
 
 ```powershell
 cd frontend
@@ -120,7 +142,7 @@ npm run dev
 
 前端开发服务器运行在 `http://localhost:5173`。
 
-### 6. 生产模式（单端口托管）
+#### 6. 生产模式（单端口托管）
 
 构建前端后，后端会自动托管 `frontend/dist`，只需运行后端即可：
 
@@ -132,7 +154,7 @@ cd ../backend
 uv run uvicorn src.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 7. 设置管理员
+#### 7. 设置管理员
 
 ```powershell
 cd backend
@@ -153,10 +175,12 @@ uv run python scripts/promote_admin.py <用户名>
 | 层 | 工具 | 位置 | 覆盖 |
 |----|------|------|------|
 | 冒烟测试 | pytest | `backend/tests/test_smoke.py` | 注册→登录→上传→列表→提交公共库→审核→可见（9 步主链路） |
-| 接口测试 | pytest（独立测试库 `cat_pic_test` + 事务回滚） | `backend/tests/` | 全部模块端点（108 用例） |
-| AI 应用测试 | pytest（respx mock + 真实冒烟） | `backend/tests/test_ai_flow.py` | SSE 流式、AI 错误降级、payload 校验 |
-| 前端 E2E | Playwright | `frontend/e2e/` | 4 条用户流（注册上传 / 提交审核 / 详情编辑 / AI 对话） |
+| 接口测试 | pytest（独立测试库 `cat_pic_test` + 事务回滚） | `backend/tests/` | 全部模块端点（231 用例，后端覆盖率 89%） |
+| AI 应用测试 | pytest（respx mock + 真实冒烟） | `backend/tests/test_ai_flow.py` | SSE 流式、AI 错误降级、payload 校验、工具调用循环 |
+| 前端 E2E | Playwright | `frontend/e2e/` | 7 条用户流（注册上传 / 提交审核 / 详情编辑 / AI 对话 / 工具调用 / 个人库标签筛选 / 公共库标签筛选） |
 | 压力测试 | Locust | `tests/perf/locustfile.py` | 5 场景，50 并发 30s 约 700 请求 0 失败 |
+
+提交与 PR 会由 GitHub Actions（`.github/workflows/ci.yml`）自动执行上述检查：后端 ruff / mypy / pytest、前端 tsc / 构建、E2E 全量跑一遍。
 
 ### 运行接口测试
 
