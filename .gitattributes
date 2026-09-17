@@ -1,0 +1,19 @@
+# 换行符规范（阶段 23）
+#
+# 背景：本机 git 配置为 core.autocrlf=true，Windows 上 checkout 会把文本文件转成 CRLF。
+# 而 docker-entrypoint.sh 是在 Linux 容器里由 sh 执行的 —— 带 CRLF 会报
+# `: not found` / `Syntax error` 之类错误，且只在"别人 clone 后构建"时才暴露，
+# 本机不易发现。因此对会在 Linux 环境（容器 / CI）中执行与解析的文件固定为 LF。
+
+# 容器内执行的脚本：必须 LF
+*.sh text eol=lf
+
+# Docker 与 CI 配置：由 Linux 侧的构建器/运行器解析
+Dockerfile text eol=lf
+*.dockerignore text eol=lf
+docker-compose.yml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# 环境变量模板：CRLF 会让变量值尾部带上 \r，导致数据库密码 / JWT 密钥与预期不符
+.env.example text eol=lf
